@@ -1,0 +1,15 @@
+{
+  "name": "@senecai/bridge",
+  "private": true,
+  "type": "module",
+  "description": "Forwards Rokoko Studio's UDP live stream to the browser over WebSocket.",
+  "scripts": {
+    "start": "node src/index.js",
+    "fake-studio": "node src/fake-studio.js",
+    "test": "node --test src/"
+  },
+  "dependencies": {
+    "lz4js": "^0.2.0",
+    "ws": "^8.23.0"
+  }
+}

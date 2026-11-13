@@ -1,0 +1,13 @@
+{
+  "name": "senecai",
+  "private": true,
+  "description": "Teach a robot hand the traditional crafts of Finland, using Rokoko Smartgloves (or a webcam emulator).",
+  "workspaces": ["web", "bridge"],
+  "scripts": {
+    "dev": "npm run dev -w web",
+    "bridge": "npm run start -w bridge",
+    "fake-studio": "npm run fake-studio -w bridge",
+    "build": "npm run build -w web",
+    "test": "npm run test -w web && npm run test -w bridge"
+  }
+}
