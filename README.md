@@ -63,6 +63,7 @@ Both paths are covered by tests: `bridge/src/sdk.test.js` (RGMP parsing, OpenXR 
 
 How SDK gloves behave in the app:
 - **Aiming.** Without a Coil Pro, the solver gives hand shape and orientation but no world position. The app therefore aims by wrist angle: tilt or turn your hand to move the robot hand (e.g. the carving knife), like a laser pointer.
+- **Glove plugged in but nothing happens (Linux).** The glove appears as `/dev/ttyACM0`, which is usually only readable by group `uucp` (Arch/Omarchy) or `dialout` (Debian/Ubuntu). Run `sudo usermod -aG uucp $USER` (or `dialout`) and log out and back in. `npm run bridge:sdk` warns about this at startup.
 - **Troubleshooting.** If the SDK reports "RBDP Protocol Error" or "Could not create device", an old `rokoko-sdk` process is holding the USB device: `pkill -x rokoko-sdk`, replug the gloves, start again. The bridge reuses an already-running driver or solver rather than starting a second one.
 
 Test without gloves:
