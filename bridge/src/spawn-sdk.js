@@ -1,8 +1,9 @@
-// Optionally starts the Rokoko Device SDK processes for you:
-//   rokoko-sdk --auto-stream-usb     (glove driver; USB streaming is Smartgloves II only, Wi-Fi gloves stream by default)
-//   rkk-hand-solver --emit-openxr    (solved 26-joint hands on 127.0.0.1:12277)
-// Already-running instances are reused (a stale second driver would block the USB device).
-// Override the arguments with SENECAI_SDK_ARGS / SENECAI_SOLVER_ARGS if your setup differs.
+// Optionally starts the Rokoko Device SDK for you. Only the hand solver is
+// launched: `rkk-hand-solver` runs the glove driver (`rokoko-sdk --auto-stream-usb`)
+// itself, so starting the driver separately would make the two fight over its
+// RGMP port 12276. If a driver is already running, the solver reuses it (--no-driver).
+//   rkk-hand-solver --emit-openxr [--driver-path <sdk>/bin/rokoko-sdk | --no-driver]
+// Extra solver arguments can be added with SENECAI_SOLVER_ARGS.
 
 import { execFileSync, spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
@@ -29,35 +30,38 @@ function isRunning(name) {
 }
 
 export function spawnSdk({ log = console.log } = {}) {
-  const children = [];
-  const start = (name, args) => {
-    if (isRunning(name)) return log(`[spawn] ${name} is already running, using it`);
-    const bin = findBin(name);
-    log(`[spawn] ${bin} ${args.join(' ')}`);
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
-    const pipe = (stream) =>
-      stream.on('data', (d) =>
-        String(d)
-          .split('\n')
-          .filter(Boolean)
-          .forEach((line) => log(`[${name}] ${line}`)),
-      );
-    pipe(child.stdout);
-    pipe(child.stderr);
-    child.on('error', (e) => log(`[spawn] could not start ${name}: ${e.message}. Is the Rokoko Device SDK installed? Check with "rokoko-sdk --version" (see README).`));
-    child.on('exit', (code, signal) => log(`[spawn] ${name} exited (${signal ?? code})`));
-    children.push(child);
-  };
-  const args = (env, def) => (process.env[env] ? process.env[env].split(/\s+/).filter(Boolean) : def);
+  let child = null;
+  if (isRunning('rkk-hand-solver')) {
+    log('[spawn] rkk-hand-solver is already running, using it');
+    return { stop() {} };
+  }
+  const args = ['--emit-openxr'];
+  if (isRunning('rokoko-sdk')) {
+    log('[spawn] rokoko-sdk is already running; the solver will use it (--no-driver)');
+    args.push('--no-driver');
+  } else {
+    const driver = findBin('rokoko-sdk');
+    if (driver !== 'rokoko-sdk') args.push('--driver-path', driver);
+  }
+  if (process.env.SENECAI_SOLVER_ARGS) args.push(...process.env.SENECAI_SOLVER_ARGS.split(/\s+/).filter(Boolean));
 
-  start('rokoko-sdk', args('SENECAI_SDK_ARGS', ['--auto-stream-usb']));
-  // Give the driver a moment to open its RGMP port before the solver connects.
-  const t = setTimeout(() => start('rkk-hand-solver', args('SENECAI_SOLVER_ARGS', ['--emit-openxr'])), 1500);
+  const bin = findBin('rkk-hand-solver');
+  log(`[spawn] ${bin} ${args.join(' ')}`);
+  child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const pipe = (stream) =>
+    stream.on('data', (d) =>
+      String(d)
+        .split('\n')
+        .filter(Boolean)
+        .forEach((line) => log(`[solver] ${line}`)),
+    );
+  pipe(child.stdout);
+  pipe(child.stderr);
+  child.on('error', (e) => log(`[spawn] could not start rkk-hand-solver: ${e.message}. Is the Rokoko Device SDK installed? Check with "rokoko doctor" (see README).`));
+  child.on('exit', (code, signal) => log(`[spawn] rkk-hand-solver exited (${signal ?? code})${code ? '. If it says "Address already in use", another rokoko-sdk is running: pkill -x rokoko-sdk and try again.' : ''}`));
 
-  const stop = () => {
-    clearTimeout(t);
-    for (const c of children) if (c.exitCode === null) c.kill('SIGTERM');
-  };
+  // SIGTERM lets the solver shut down the driver it started.
+  const stop = () => child?.exitCode === null && child.kill('SIGTERM');
   process.on('exit', stop);
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => (stop(), process.exit(0)));
   return { stop };

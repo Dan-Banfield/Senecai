@@ -49,16 +49,17 @@ Both paths are covered by tests: `bridge/src/sdk.test.js` (RGMP parsing, OpenXR 
 
 ## Gloves on Linux (Rokoko Device SDK, no Studio)
 
-1. **Install the SDK.** Sign in at [id.rokoko.com](https://id.rokoko.com), open the team with the SDK licence, and follow **Install guide** on the SDK licence tile ([Linux guide](https://sdk.rokoko.com/guides/install/linux/); needs Ubuntu 22.04 / Debian 12 or newer). Check it with `rokoko-sdk --version`.
-2. **Plug in the gloves.** Smartgloves II stream over USB. Smartgloves (I) stream over Wi-Fi; pair them once over USB using the SDK's `network_configuration.py` ([Wi-Fi guide](https://sdk.rokoko.com/guides/wifi-setup/)).
-3. **Start everything:**
+1. **Get the SDK licence (free for the Junction track, no subscription).** Create a Rokoko ID, then submit your Rokoko ID email and team via the form linked in the Rokoko challenge description. Once a Rokoko rep approves it, an **SDK License** tile appears on your team page at [id.rokoko.com](https://id.rokoko.com). Ignore the Studio trial and upgrade buttons; they're unrelated. If approval is slow, ask the Rokoko rep or the Aalto Robotics Club mentors on site.
+2. **Install the SDK.** Follow **Install guide** on the SDK License tile ([Linux guide](https://sdk.rokoko.com/guides/install/linux/); needs Ubuntu 22.04 / Debian 12 or newer). Check it with `rokoko-sdk --version`.
+3. **Plug in the gloves.** Smartgloves II stream over USB. Smartgloves (I) stream over Wi-Fi; pair them once over USB using the SDK's `network_configuration.py` ([Wi-Fi guide](https://sdk.rokoko.com/guides/wifi-setup/)).
+4. **Start everything:**
    ```bash
-   npm run bridge:sdk   # starts rokoko-sdk --auto-stream-usb and rkk-hand-solver --emit-openxr, then the bridge
+   npm run bridge:sdk   # starts rkk-hand-solver --emit-openxr (which runs the glove driver), then the bridge
    npm run dev          # in another terminal
    ```
-   Or start the SDK yourself (`rokoko-sdk --auto-stream-usb` and `rkk-hand-solver --emit-openxr`) and run `npm run bridge`. Override the spawned arguments with `SENECAI_SDK_ARGS` / `SENECAI_SOLVER_ARGS`.
-4. In Senecai, choose **Rokoko Smartgloves**. The input panel should say "Streaming from the Rokoko Device SDK". The bridge log shows each glove and which hand it is.
-5. **Calibrate** (open hand, then fist). This matters more for gloves: the solver's heading is relative to magnetic north, so until you calibrate, the pose when the gloves connect counts as "neutral".
+   Or start the solver yourself (`rkk-hand-solver --emit-openxr`; it launches `rokoko-sdk` for you, so do not start that separately) and run `npm run bridge`. Add solver arguments with `SENECAI_SOLVER_ARGS`.
+5. In Senecai, choose **Rokoko Smartgloves**. The input panel should say "Streaming from the Rokoko Device SDK". The bridge log shows each glove and which hand it is.
+6. **Calibrate** (open hand, then fist). This matters more for gloves: the solver's heading is relative to magnetic north, so until you calibrate, the pose when the gloves connect counts as "neutral".
 
 How SDK gloves behave in the app:
 - **Aiming.** Without a Coil Pro, the solver gives hand shape and orientation but no world position. The app therefore aims by wrist angle: tilt or turn your hand to move the robot hand (e.g. the kuksa knife), like a laser pointer.

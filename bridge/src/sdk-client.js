@@ -19,6 +19,7 @@ export function connectSdk({ host = '127.0.0.1', port = 12277, onFrame, log = co
   let dirty = false;
   let warnedNoOpenxr = false;
   let lastState = '';
+  let noGloveTimer = null;
   const state = (s) => {
     if (s !== lastState) log(`[sdk] ${s}`);
     lastState = s;
@@ -70,6 +71,11 @@ export function connectSdk({ host = '127.0.0.1', port = 12277, onFrame, log = co
     socket.on('connect', () => {
       socket.setTimeout(0);
       state(`connected to hand solver at ${host}:${port}, waiting for gloves`);
+      clearTimeout(noGloveTimer);
+      noGloveTimer = setTimeout(() => {
+        if (!devices.size)
+          log('[sdk] still no gloves. Check "rokoko device list": Smartgloves II must be plugged in by USB (check "lsusb"); Smartgloves (I) must be paired to Wi-Fi first. See README.');
+      }, 10000);
     });
     socket.on('data', (chunk) => parser.push(chunk));
     socket.on('timeout', () => socket.destroy(new Error('connect timeout')));
@@ -109,6 +115,7 @@ export function connectSdk({ host = '127.0.0.1', port = 12277, onFrame, log = co
     close() {
       closed = true;
       clearTimeout(timer);
+      clearTimeout(noGloveTimer);
       clearInterval(emitter);
       socket?.destroy();
     },

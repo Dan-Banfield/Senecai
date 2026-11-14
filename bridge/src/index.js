@@ -94,7 +94,7 @@ setInterval(() => {
 }, 5000);
 
 console.log(`Senecai bridge
-  Rokoko Device SDK : ${flag('no-sdk') ? 'off' : `hand solver at tcp://${SDK_HOST}:${SDK_PORT}${flag('spawn-sdk') ? ' (starting rokoko-sdk + rkk-hand-solver)' : ''}`}
+  Rokoko Device SDK : ${flag('no-sdk') ? 'off' : `hand solver at tcp://${SDK_HOST}:${SDK_PORT}${flag('spawn-sdk') ? ' (starting rkk-hand-solver, which runs the glove driver)' : ''}`}
   Rokoko Studio     : ${flag('no-studio') ? 'off' : `udp://0.0.0.0:${UDP_PORT}`}
   browsers          : ws://localhost:${WS_PORT}
   (no gloves? "npm run fake-sdk" or "npm run fake-studio" in another terminal)`);
