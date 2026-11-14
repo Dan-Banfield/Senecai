@@ -4,25 +4,25 @@
 
 Junction 2026 · Rokoko track: *"Use professional motion capture to control robotic hands… useful, unexpected, or downright unbelievable."*
 
-- **The globe** (home page): a night-side Earth under a procedural starry sky. Spin it and land on a country. Pins mark where each craft comes from (copper = playable, pale = coming), and hover cards show a photo, the story, and what the craft would teach a robot. Community creations are pinned where they were made, with animated arcs showing who learned from whom. When zoomed out, crowded countries collapse into one cluster; clicking it lands there.
+- **The globe** (home page): a flat-coloured Earth under a procedural starry sky (craft countries in green). Drag to spin, click a country to land, click outside it or press Esc to zoom back out, or use the search bar to find a country, region or craft. Pins mark where each craft comes from, and hover cards show a photo, the story, and what the craft would teach a robot. When zoomed out, crowded countries collapse into one cluster; clicking it lands there.
 - **Kantele** (Finland's five-string national instrument): one finger per string, which maps directly onto a five-finger robot hand. Guided lessons with a ghost hand, a rhythm-game timing mode, and free play with recording.
-- **Kuksa** (the birch-burl cup): the robot hand holds a puukko knife and carves a voxel birch block. Grip strength sets cutting pressure, the other hand turns the workpiece, and an x-ray outline shows the cup inside the wood.
-- **Community**: every creation is a recorded teleoperation demonstration. You can watch the robot replay it, press **Learn this** to turn it into a tutorial (the ghost hand follows the creator's real movements), or download it as a training-data JSON file.
+- **Puukko workbench** (the Finnish belt knife): a virtual smithy and carving table. Close your hand over a tool to pick it up and squeeze to use it. Heat the bar in the forge, hammer the blade out on the anvil, quench it, sharpen it, then carve the birch handle and fit the blade. For the handle, your other hand picks up the blank with a fist and holds it; it follows that hand in 3D and turns as your wrist turns. The knife takes a shaving wherever you draw it across the wood, and how hard you squeeze sets the depth, from a thin curl to a deep bite. The wood is a density field drawn as a smooth surface with real grain, so cuts thinner than a voxel show.
+- **Recordings remember everything**: both robot hands, the tool each one holds, and every change made to the workpiece, frame by frame. Replays rebuild the object's mesh exactly as it was made, and you can scrub through them.
+- **Community**: every creation is a recorded teleoperation demonstration. You can watch the robot replay it, press **Learn this** to turn it into a tutorial (ghost hands follow the creator's real movements), or download it as a training-data JSON file.
 
 ## Quick start
 
 ```bash
-npm install          # also copies MediaPipe WASM, the hand model and Earth textures, so everything works offline
+npm install          # also copies MediaPipe WASM and the hand model, so hand tracking works offline
 npm run dev          # http://localhost:5173
 ```
 
 Open the app, click **Choose input** (top right), then pick one:
 
-| Input | What it is |
 |---|---|
 | 📷 Webcam (glove emulator) | MediaPipe hand tracking converted into **Rokoko JSON v3 frames**. Hold your hand up with the palm facing the camera. |
 | 🧤 Rokoko Smartgloves | Real gloves: Rokoko Studio → bridge → browser. |
-| ⌨️ Keyboard + mouse | `A S D F G` curl thumb…little, `Space` = fist, `H` = thumb across palm, mouse moves the hand. |
+| ⌨️ Keyboard + mouse | Right hand: `A S D F G` curl thumb…little, `Space` = fist, `H` = thumb across palm, mouse moves the hand. Left hand: `Z` closes/opens its fist, arrow keys turn its wrist. |
 
 Calibrate (open hand, then fist; about 6 seconds) from the same panel. It makes a big difference.
 
@@ -62,7 +62,7 @@ Both paths are covered by tests: `bridge/src/sdk.test.js` (RGMP parsing, OpenXR 
 6. **Calibrate** (open hand, then fist). This matters more for gloves: the solver's heading is relative to magnetic north, so until you calibrate, the pose when the gloves connect counts as "neutral".
 
 How SDK gloves behave in the app:
-- **Aiming.** Without a Coil Pro, the solver gives hand shape and orientation but no world position. The app therefore aims by wrist angle: tilt or turn your hand to move the robot hand (e.g. the kuksa knife), like a laser pointer.
+- **Aiming.** Without a Coil Pro, the solver gives hand shape and orientation but no world position. The app therefore aims by wrist angle: tilt or turn your hand to move the robot hand (e.g. the carving knife), like a laser pointer.
 - **Troubleshooting.** If the SDK reports "RBDP Protocol Error" or "Could not create device", an old `rokoko-sdk` process is holding the USB device: `pkill -x rokoko-sdk`, replug the gloves, start again. The bridge reuses an already-running driver or solver rather than starting a second one.
 
 Test without gloves:
@@ -99,8 +99,11 @@ web/src/rokoko/         JSON v3 types, parser, FK frame builder
 web/src/input/          webcam / gloves / keyboard sources, live pipeline + calibration (zustand)
 web/src/robot/          retargeting, Inspire export, procedural 3D robot hand
 web/src/crafts/kantele/ music, lessons, pluck detection, Karplus-Strong audio, session, 3D stage
-web/src/crafts/kuksa/   voxel engine (carve, raycast, scoring), session, 3D stage
-web/src/recording/      demonstration recording / playback / export
+web/src/bench/          craft workbench: core (ops, bench state), session (input → tools → ops, holding work in
+                        the off hand, recording, replay), materials/ (voxel wood with knife shaving, surface-nets
+                        mesher, forged bar), crafts/ (the puukko, plus shared moves in kit.ts),
+                        render/ (3D table, tools, stations, wood shader, workpiece meshes)
+web/src/recording/      kantele (v1) demonstration recording / playback / export
 web/src/community/      CommunityApi + fake backend (localStorage + procedurally generated seeds), places
 web/src/crafts/catalog.ts  every craft on the globe: region, story, robot skills, photo credit
 web/src/globe/          country shapes + geo helpers, procedural starfield
@@ -108,11 +111,13 @@ web/public/crafts/      craft photos (Wikimedia Commons, resized)
 web/src/pages, ui/      React pages and components
 ```
 
-`npm test` runs the web (vitest) and bridge (node:test) suites. In dev, `window.senecaiKantele` (running kantele session) and `window.senecaiGlobe` (globe.gl instance) are exposed for debugging.
+`npm test` runs the web (vitest) and bridge (node:test) suites. In dev, `window.senecaiKantele` (running kantele session), `window.senecaiBench` (running workbench session) and `window.senecaiGlobe` (globe.gl instance) are exposed for debugging.
 
 ## Adding a craft to the globe
 
 Add an entry to `web/src/crafts/catalog.ts` (`country` must match the name in `world-atlas`; `npm test` checks this) and put a 640px photo in `web/public/crafts/`. Set `status: 'playable'` and a `route` once it has a page.
+
+To give it a workbench, add a `CraftBench` in `web/src/bench/crafts/` (tools, stations, workpieces, stages and an `interact` function that turns squeezes into ops), register it in `web/src/bench/crafts/index.ts`, and set its route to `/craft/<id>`. Every change to a workpiece must go through an op so recordings replay it exactly.
 
 ## Assumptions to verify on site
 
@@ -124,7 +129,8 @@ Add an entry to `web/src/crafts/catalog.ts` (`country` must match the name in `w
 ## Known gaps (it's a first draft)
 
 - The community backend is fake: localStorage plus generated seed creations. `CommunityApi` is the seam for a real one.
-- The kuksa knife cuts by raycasting from the camera through the hand's position, which works for both webcam and gloves. With a Coil Pro for absolute hand position, true 3D cutting would be the natural upgrade.
+- On the workbench the hand aims like a pointer: its position picks a point in the camera view, and squeezing grabs or uses a tool there. That works for webcam and gloves alike; with a Coil Pro for absolute hand position, true 3D tool contact would be the natural upgrade.
+- Only the kantele has seeded example creations in the community; the puukko starts empty.
 - Webcam tracking is noisier than the gloves and is smoothed more heavily (`dofTau` in `pipeline.ts`).
 
 ## Credits
@@ -134,18 +140,6 @@ Craft photos are from Wikimedia Commons, resized to 640px; each card shows its c
 | Photo | Author | Licence | Source |
 |---|---|---|---|
 | kantele | TheYellowFellow | CC0 | [Commons](https://commons.wikimedia.org/wiki/File:Five_string_kanteles.jpg) |
-| kuksa | Duodjiinfo | CC BY-SA 3.0 | [Commons](https://commons.wikimedia.org/wiki/File:Guksi.jpg) |
 | puukko | Kuroczynski | CC BY-SA 4.0 | [Commons](https://commons.wikimedia.org/wiki/File:%E2%80%9EIMG_5221_Puukko_and_fish_filleting_knife_with_sheath_by_J._Marttiini_(cropped).jpg) |
-| lace | Krzysiu | CC BY 4.0 | [Commons](https://commons.wikimedia.org/wiki/File:Bobbin_lace_making_Myjava-Festival.jpg) |
-| himmeli | Tomi Knuutila | CC BY 2.0 | [Commons](https://commons.wikimedia.org/wiki/File:Himmeli_(1433508300).jpg) |
-| dala | Mysid | Public domain | [Commons](https://commons.wikimedia.org/wiki/File:Dalecarlian_horse.jpg) |
-| hardanger | Frode Inge Helland | CC BY-SA 3.0 | [Commons](https://commons.wikimedia.org/wiki/File:Midt.jpg) |
-| murano | Dennis G. Jarvis | CC BY-SA 2.0 | [Commons](https://commons.wikimedia.org/wiki/File:Italy-1453_-_Murano_Glass_(5228946002).jpg) |
-| wycinanki | Unknown author | Public domain | [Commons](https://commons.wikimedia.org/wiki/File:Wycinanka_lowicka._1909_(106673350).jpg) |
-| pysanka | Lubap | CC BY-SA 4.0 | [Commons](https://commons.wikimedia.org/wiki/File:Meander_Motif_on_a_Ukrainian_Pysanka.JPG) |
-| delft | Unknown author | Public domain | [Commons](https://commons.wikimedia.org/wiki/File:Delft-tile-milkmaid-c1700.JPG) |
-| tweed | Callicvol | CC BY-SA 2.0 | [Commons](https://commons.wikimedia.org/wiki/File:Tying_Harris_Tweed.jpg) |
-| azulejo | NorbertNagel | CC BY-SA 4.0 | [Commons](https://commons.wikimedia.org/wiki/File:Azulejo_facade_in_Rua_de_S%C3%A3o_Bento_-_Lisbon_-_Portugal.jpg) |
-| kannel | Adeliine | CC BY-SA 3.0 | [Commons](https://commons.wikimedia.org/wiki/File:V%C3%A4ikekannel.jpg) |
 
-Earth textures come from the [three-globe](https://github.com/vasturiano/three-globe) examples, and country outlines from [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth). The globe uses [globe.gl](https://globe.gl).
+Country outlines come from [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth). The globe uses [globe.gl](https://globe.gl).

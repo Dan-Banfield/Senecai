@@ -2,11 +2,8 @@
 // demo. Every seed carries a real, replayable recording, so "learn this" works
 // on seeds too. Authors are fictional.
 
-import * as THREE from 'three';
 import { HAND_BASE } from '../crafts/kantele/session';
 import { STRING_DOF } from '../crafts/kantele/music';
-import { wristForTip } from '../crafts/kuksa/session';
-import { analyseTarget, CELLS, cellToLocal, coords, DIM, encodeShape, makeTarget, type KuksaParams, DEFAULT_KUKSA } from '../crafts/kuksa/voxels';
 import type { RecEvent, RecFrame, Recording } from '../recording/recording';
 import type { Creation } from './api';
 import type { GeoPoint } from './places';
@@ -37,54 +34,6 @@ function kanteleRecording(bpm: number, pattern: (number | number[] | null)[]): R
   return { version: 1, craft: 'kantele', source: 'seed', durationMs: Math.round(duration), frames, events };
 }
 
-function kuksaRecording(params: KuksaParams) {
-  const target = makeTarget(params);
-  const a = analyseTarget(target);
-  const cx = 2 + params.rx;
-  const cz = DIM.z / 2;
-  // Order the waste like a carver would: outside first (top-down, around the
-  // block), then the hollow from the rim inwards.
-  const waste: { i: number; key: number }[] = [];
-  for (let i = 0; i < CELLS; i++) {
-    if (target.data[i]) continue;
-    const [x, y, z] = coords(i);
-    const ang = Math.atan2(z - cz, x - cx);
-    const key = a.cavity[i] ? 1e6 + (DIM.y - y) * 1000 + Math.hypot(x - cx, z - cz) * 10 : (DIM.y - y) * 1000 + (ang + Math.PI) * 100;
-    waste.push({ i, key });
-  }
-  waste.sort((p, q) => p.key - q.key);
-
-  const CHUNK = 26;
-  const STEP = 32;
-  const events: RecEvent[] = [];
-  const frames: RecFrame[] = [];
-  let t = 500;
-  let yaw = 0.35;
-  for (let k = 0; k < waste.length; k += CHUNK) {
-    const cells = waste.slice(k, k + CHUNK).map((w) => w.i);
-    const c = new THREE.Vector3();
-    for (const cell of cells) c.add(new THREE.Vector3(...cellToLocal(...coords(cell))));
-    c.divideScalar(cells.length);
-    // Turn the block so the area being carved faces the viewer.
-    const isCavity = a.cavity[cells[0]];
-    const want = isCavity ? yaw : -Math.atan2(c.x, c.z);
-    let dy = want - yaw;
-    while (dy > Math.PI) dy -= 2 * Math.PI;
-    while (dy < -Math.PI) dy += 2 * Math.PI;
-    if (Math.abs(dy) > 0.05) {
-      yaw += dy * 0.15;
-      events.push({ t, type: 'yaw', value: r3(yaw) });
-    }
-    events.push({ t, type: 'cut', cells });
-    const tip = c.clone().applyAxisAngle(new THREE.Vector3(0, 1, 0), yaw);
-    const w = wristForTip(tip, 'right');
-    frames.push({ t, hands: [{ side: 'right', dof: [0.5, 0.5, 0.85, 0.85, 0.85, 0.85], p: w.position.toArray().map(r3), q: w.rotation.toArray().map(r3) }] });
-    t += STEP;
-  }
-  const recording: Recording = { version: 1, craft: 'kuksa', source: 'seed', durationMs: t + 300, frames, events };
-  return { recording, shape: encodeShape(target) };
-}
-
 interface SeedMeta {
   id: string;
   title: string;
@@ -100,7 +49,6 @@ const at = (place: string, lat: number, lng: number): GeoPoint => ({ place, lat,
 
 export function generateSeeds(): Creation[] {
   const k = (m: SeedMeta, rec: Recording): Creation => ({ ...m, learnedFrom: undefined, craft: 'kantele', recording: rec, seeded: true });
-  const v = (m: SeedMeta, params: KuksaParams, score: number): Creation => ({ ...m, learnedFrom: undefined, craft: 'kuksa', score, seeded: true, ...kuksaRecording(params) });
 
   const runo = [0, 1, 2, 2, 3, 2, 1, 1, 0, null];
   const runoB = [2, 3, 4, 4, 3, 2, 1, 1, 0, null];
@@ -110,29 +58,17 @@ export function generateSeeds(): Creation[] {
   add({ id: 'seed-dawn', title: 'Päijänne at dawn', author: 'Aino K.', description: 'Slow rising arpeggios, like mist lifting off the lake. Good one for practising the ring finger.', createdAt: daysAgo(0, 3), likes: 41, location: at('Jyväskylä, Finland', 62.24, 25.75) }, (m) =>
     k(m, kanteleRecording(72, [0, 2, 4, 2, 1, 3, 4, 3, 0, 2, 4, 3, 2, 1, 0, null])),
   );
-  add({ id: 'seed-classic', title: 'Classic kuksa with finger hole', author: 'Juhani R.', description: 'The shape my grandfather carved: deep bowl and a short handle with a hole for two fingers. Hollow it in light passes!', createdAt: daysAgo(0, 9), likes: 63, location: at('Inari, Finland', 68.91, 27.03) }, (m) =>
-    v(m, DEFAULT_KUKSA, 96),
-  );
   add({ id: 'seed-runo', title: 'Runo for my grandmother', author: 'Väinö L.', description: 'A runo-style tune in five beats. She used to sing something like this while weaving.', createdAt: daysAgo(1, 2), likes: 87, location: at('Joensuu, Finland', 62.6, 29.76) }, (m) =>
     k(m, kanteleRecording(92, [...runo, ...runoB, ...runo])),
   );
   add({ id: 'seed-kyoto', title: 'First kantele, far from home', author: 'Hana S.', description: "Learned Väinö's runo through the ghost hand, then slowed it down. Five strings feel a little like a koto.", createdAt: daysAgo(0, 6), likes: 34, location: at('Kyoto, Japan', 35.01, 135.77), learnedFrom: 'seed-runo' }, (m) =>
     k(m, kanteleRecording(76, [...runo, ...runo])),
   );
-  add({ id: 'seed-coffee', title: 'Deep coffee kuksa', author: 'Inkeri S.', description: 'Extra-deep bowl for campfire coffee, with a plain tab handle. The hollowing takes patience.', createdAt: daysAgo(2, 5), likes: 29, location: at('Rovaniemi, Finland', 66.5, 25.73) }, (m) =>
-    v(m, { ...DEFAULT_KUKSA, rx: 9, rz: 9, depth: 17, handleLen: 7, hole: false }, 91),
-  );
-  add({ id: 'seed-edinburgh', title: 'Hebridean kuksa', author: 'Callum M.', description: "Followed Juhani's classic, then made the handle longer for a gloved hand. Birch is scarce here, so the virtual burl was a treat.", createdAt: daysAgo(1, 8), likes: 22, location: at('Edinburgh, UK', 55.95, -3.19), learnedFrom: 'seed-classic' }, (m) =>
-    v(m, { ...DEFAULT_KUKSA, rx: 9.5, rz: 9, depth: 14, handleLen: 10, handleWidth: 3.2 }, 84),
-  );
   add({ id: 'seed-polka', title: 'Sauna polka', author: 'Eero M.', description: 'Bouncy two-finger chords. Try it fast!', createdAt: daysAgo(3, 1), likes: 54, location: at('Tampere, Finland', 61.5, 23.76) }, (m) =>
     k(m, kanteleRecording(132, [[0, 2], 4, [1, 3], 4, [0, 2], 4, [1, 3], 2, [0, 2], 4, [1, 3], 4, [2, 4], 3, [0, 2], null])),
   );
   add({ id: 'seed-kannel', title: 'Kannel echoes', author: 'Mari T.', description: "Tuned to the same five notes as my grandmother's kannel. The kantele and kannel are cousins, and the robot hand doesn't mind which.", createdAt: daysAgo(2, 1), likes: 38, location: at('Tallinn, Estonia', 59.44, 24.75) }, (m) =>
     k(m, kanteleRecording(84, [0, 1, 2, 1, 0, null, 2, 3, 4, 3, 2, null, 4, 3, 2, 1, 0, null])),
-  );
-  add({ id: 'seed-berry', title: 'Wide berry-picking cup', author: 'Lassi P.', description: 'A shallow, wide cup for bilberries. Easier to hollow, harder to keep the wall even.', createdAt: daysAgo(4, 7), likes: 18, location: at('Kuusamo, Finland', 65.96, 29.19) }, (m) =>
-    v(m, { ...DEFAULT_KUKSA, rx: 12, rz: 11, depth: 12, handleLen: 6 }, 88),
   );
   add({ id: 'seed-lisbon', title: 'Fado on five strings', author: 'Inês R.', description: "Started from Aino's dawn piece and let it drift towards fado. Saudade, but Finnish.", createdAt: daysAgo(3, 4), likes: 27, location: at('Lisbon, Portugal', 38.72, -9.14), learnedFrom: 'seed-dawn' }, (m) =>
     k(m, kanteleRecording(66, [4, 3, 2, 3, 1, null, 0, 2, 1, 0, null, 4, 2, 3, 1, 0, null])),

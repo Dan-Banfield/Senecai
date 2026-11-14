@@ -1,11 +1,11 @@
 // The home page: a night-side Earth under a procedural starry sky. Spin it,
-// click a country to land there, and hover the glowing pins: copper for crafts
-// (bright = playable now), pale for crafts still to come, blue for community
-// creations. Arcs show who learned from whom.
+// click a country to land there, and hover the glowing pins: green for crafts
+// (bright = playable now), pale for crafts still to come.
 
 import Globe, { type GlobeInstance } from 'globe.gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { MeshPhongMaterial } from 'three';
 import { community, type Creation } from '../community/api';
 import { DEFAULT_PLACE } from '../community/places';
 import { CRAFTS, craftById, type CraftInfo } from '../crafts/catalog';
@@ -19,27 +19,24 @@ type Pin =
   /** Zoomed out, a crowded country collapses into one pin; clicking it lands there. */
   | { id: string; kind: 'cluster'; lat: number; lng: number; country: string; crafts: CraftInfo[]; creations: Creation[] };
 
-interface Arc {
-  startLat: number;
-  startLng: number;
-  endLat: number;
-  endLng: number;
-  kind: 'learned' | 'origin';
-  label: string;
-}
-
 const HOME_POV = { lat: 50, lng: 14, altitude: 2.3 };
 const CARD_W = 300;
-const IDLE_BEFORE_SPIN_MS = 6000;
 /** Above this camera altitude (globe radii), crowded countries are clustered. */
 const CLUSTER_ABOVE = 1.3;
 const UNCLUSTER_BELOW = 1.1;
 const CLUSTER_MIN_PINS = 3;
 const CRAFT_COUNTRIES = new Set(CRAFTS.map((c) => c.country));
+/** Flat, solid-colour globe: plain ocean, opaque countries. */
+const COLORS = {
+  ocean: '#0c1114',
+  land: '#24384a',
+  landCraft: '#2f6b3a',
+  landHover: '#6fae7a',
+  landSelected: '#4a8f57',
+  landSide: 'rgba(95,163,107,0.35)',
+};
 
 const locationOf = (c: Creation) => c.location ?? DEFAULT_PLACE;
-/** A fresh accessor each time, so globe.gl notices the change. */
-const arcStroke = (scale: number) => (d: object) => ((d as Arc).kind === 'learned' ? 0.5 : 0.28) * scale;
 const countryName = (d: object) => (d as CountryFeature).properties.name;
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
 
@@ -104,25 +101,6 @@ function buildPins(creations: Creation[], countryOf: Map<string, string | undefi
     placed.push(pin);
   }
   return placed;
-}
-
-function buildArcs(creations: Creation[]): Arc[] {
-  const byId = new Map(creations.map((c) => [c.id, c]));
-  const arcs: Arc[] = [];
-  for (const c of creations) {
-    const end = locationOf(c);
-    const src = c.learnedFrom && byId.get(c.learnedFrom.id);
-    if (src) {
-      const start = locationOf(src);
-      arcs.push({ startLat: start.lat, startLng: start.lng, endLat: end.lat, endLng: end.lng, kind: 'learned', label: `${c.author} learned "${src.title}" from ${src.author}` });
-      continue;
-    }
-    const origin = craftById(c.craft);
-    if (origin && distanceKm(origin, end) > 300) {
-      arcs.push({ startLat: origin.lat, startLng: origin.lng, endLat: end.lat, endLng: end.lng, kind: 'origin', label: `${origin.name} travelled to ${end.place}` });
-    }
-  }
-  return arcs;
 }
 
 function pinElement(pin: Pin, handlers: React.MutableRefObject<PinHandlers>): HTMLElement {
@@ -241,7 +219,7 @@ function CreationCard({ creation }: { creation: Creation }) {
           <Link className="btn small primary" to={`/community/${creation.id}`}>
             Watch the robot
           </Link>
-          <Link className="btn small" to={creation.craft === 'kantele' ? `/kantele?from=${creation.id}` : `/kuksa?from=${creation.id}`}>
+          <Link className="btn small" to={creation.craft === 'kantele' ? `/kantele?from=${creation.id}` : `/craft/${creation.craft}?from=${creation.id}`}>
             Learn this
           </Link>
         </div>
@@ -252,6 +230,8 @@ function CreationCard({ creation }: { creation: Creation }) {
 
 export default function GlobePage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const pendingCraftRef = useRef<CraftInfo | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const cardRef = useRef<HTMLDivElement>(null);
@@ -261,7 +241,6 @@ export default function GlobePage() {
   const hoverRef = useRef<Pin | null>(null);
   const selectedRef = useRef<CountryFeature | null>(null);
   const hoverCountryRef = useRef<string | null>(null);
-  const lastInteractRef = useRef(0);
   const hideTimer = useRef(0);
   const flyTimer = useRef(0);
   const creationsRef = useRef<Creation[]>([]);
@@ -274,7 +253,6 @@ export default function GlobePage() {
   const [aboutOpen, setAboutOpen] = useState(false);
   const [clustered, setClustered] = useState(true);
   const clusteredRef = useRef(true);
-  const arcScaleRef = useRef(1);
   const creationCountry = useMemo(
     () => new Map(creations.map((c) => [c.id, locationOf(c).country ?? countryAt(countries, locationOf(c).lat, locationOf(c).lng)])),
     [creations, countries],
@@ -314,11 +292,11 @@ export default function GlobePage() {
     const sel = selectedRef.current?.properties.name;
     g.polygonCapColor((d: object) => {
       const n = countryName(d);
-      if (n === sel) return 'rgba(127,209,232,0.18)';
-      if (n === hov) return 'rgba(224,150,92,0.28)';
-      return CRAFT_COUNTRIES.has(n) ? 'rgba(200,121,65,0.09)' : 'rgba(0,0,0,0)';
+      if (n === sel) return COLORS.landSelected;
+      if (n === hov) return COLORS.landHover;
+      return CRAFT_COUNTRIES.has(n) ? COLORS.landCraft : COLORS.land;
     })
-      .polygonSideColor((d: object) => (countryName(d) === hov || countryName(d) === sel ? 'rgba(224,150,92,0.25)' : 'rgba(0,0,0,0)'))
+      .polygonSideColor((d: object) => (countryName(d) === hov || countryName(d) === sel ? COLORS.landSide : 'rgba(0,0,0,0)'))
       .polygonAltitude((d: object) => (countryName(d) === sel ? 0.02 : countryName(d) === hov ? 0.014 : 0.005));
   };
 
@@ -342,12 +320,22 @@ export default function GlobePage() {
       g.pointOfView({ lat: v.lat, lng: v.lng, altitude: altitudeForSpan(v.spanDeg) }, 1300);
     } else {
       g.pointOfView({ ...g.pointOfView(), altitude: HOME_POV.altitude }, 1100);
-      lastInteractRef.current = performance.now() - IDLE_BEFORE_SPIN_MS + 1500;
     }
     refreshPolygons();
   };
   const selectRef = useRef(selectCountry);
   selectRef.current = selectCountry;
+
+  /** Click outside / Escape: close any open card and zoom back out to the whole world. */
+  const dismiss = () => {
+    clearTimeout(hideTimer.current);
+    hoverRef.current = null;
+    setHover(null);
+    setAboutOpen(false);
+    if (selectedRef.current) selectCountry(null);
+  };
+  const dismissRef = useRef(dismiss);
+  dismissRef.current = dismiss;
 
   // Create the globe once.
   useEffect(() => {
@@ -356,8 +344,7 @@ export default function GlobePage() {
 
     const g = new Globe(mount, { animateIn: true })
       .backgroundColor('#03060a')
-      .globeImageUrl('/globe/earth-night.jpg')
-      .bumpImageUrl('/globe/earth-topology.png')
+      .globeMaterial(new MeshPhongMaterial({ color: COLORS.ocean, shininess: 4 }))
       .showAtmosphere(true)
       .atmosphereColor('#7fd1e8')
       .atmosphereAltitude(0.17)
@@ -375,15 +362,7 @@ export default function GlobePage() {
         hoverCountryRef.current = d ? countryName(d) : null;
         refreshPolygons();
       })
-      .onPolygonClick((d: object) => selectRef.current(d as CountryFeature))
-      .onGlobeClick(() => selectRef.current(null))
       .onZoom(({ altitude }) => {
-        // Arcs are tubes in globe units: thin them out as we zoom in so they don't turn into pipes.
-        const scale = Math.round(Math.min(1, Math.max(0.2, altitude / HOME_POV.altitude)) * 10) / 10;
-        if (scale !== arcScaleRef.current) {
-          arcScaleRef.current = scale;
-          g.arcStroke(arcStroke(scale));
-        }
         const want = altitude > CLUSTER_ABOVE ? true : altitude < UNCLUSTER_BELOW ? false : clusteredRef.current;
         if (want !== clusteredRef.current) {
           clusteredRef.current = want;
@@ -396,21 +375,6 @@ export default function GlobePage() {
       .htmlAltitude(0.008)
       .htmlElement((d: object) => pinElement(d as Pin, handlers))
       .htmlElementVisibilityModifier((el: HTMLElement, visible: boolean) => el.classList.toggle('pin-hidden', !visible))
-      .ringsData(CRAFTS.filter((c) => c.status === 'playable'))
-      .ringLat('lat')
-      .ringLng('lng')
-      .ringColor(() => (t: number) => `rgba(224,150,92,${(1 - t) * 0.85})`)
-      .ringMaxRadius(3.4)
-      .ringPropagationSpeed(1.5)
-      .ringRepeatPeriod(1800)
-      .arcsData([])
-      .arcColor((d: object) => ((d as Arc).kind === 'learned' ? ['rgba(127,209,232,0.9)', 'rgba(224,150,92,0.9)'] : ['rgba(224,150,92,0.55)', 'rgba(224,150,92,0.12)']))
-      .arcStroke(arcStroke(1))
-      .arcDashLength(0.4)
-      .arcDashGap(0.18)
-      .arcDashAnimateTime((d: object) => ((d as Arc).kind === 'learned' ? 2400 : 4200))
-      .arcAltitudeAutoScale(0.38)
-      .arcLabel((d: object) => `<div class="country-tip"><span>${esc((d as Arc).label)}</span></div>`)
       .pointOfView(HOME_POV, 0);
     globeRef.current = g;
     if (import.meta.env.DEV) (window as unknown as { senecaiGlobe: GlobeInstance }).senecaiGlobe = g;
@@ -418,11 +382,8 @@ export default function GlobePage() {
 
     g.renderer().setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     const controls = g.controls();
-    controls.autoRotate = true;
-    controls.autoRotateSpeed = 0.45;
+    controls.autoRotate = false;
     controls.maxDistance = 100 * (1 + 4);
-    controls.addEventListener('start', () => (lastInteractRef.current = Infinity));
-    controls.addEventListener('end', () => (lastInteractRef.current = performance.now()));
 
     const sky = createStarfield({ radius: 30000 });
     g.scene().add(sky.object);
@@ -430,12 +391,44 @@ export default function GlobePage() {
     const ro = new ResizeObserver(() => g.width(wrap.clientWidth).height(wrap.clientHeight));
     ro.observe(wrap);
 
-    // Per-frame: twinkle, auto-spin when idle, keep the hover card pinned to its dot.
+    // Clicks (not drags) on the map. We work out what is under the cursor ourselves rather than
+    // use globe.gl's click callbacks: those ignore empty space and lag behind the pointer.
+    //  - world view: a country lands there; ocean or space does nothing.
+    //  - focused on a country: anything outside it (another country, ocean, space) zooms back out.
+    // Pins stop their own events, so they never reach here.
+    let down: { x: number; y: number } | null = null;
+    const onDown = (e: PointerEvent) => {
+      down = { x: e.clientX, y: e.clientY };
+    };
+    const onUp = (e: PointerEvent) => {
+      const dragged = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6;
+      down = null;
+      if (dragged || e.button !== 0) return;
+      const rect = mount.getBoundingClientRect();
+      const at = g.toGlobeCoords(e.clientX - rect.left, e.clientY - rect.top);
+      const name = at ? countryAt(countries, at.lat, at.lng) : undefined;
+      const sel = selectedRef.current;
+      if (sel) {
+        if (name !== sel.properties.name) dismissRef.current();
+      } else if (name) {
+        const f = countries.find((c) => c.properties.name === name);
+        if (f) selectRef.current(f);
+      }
+    };
+    mount.addEventListener('pointerdown', onDown);
+    mount.addEventListener('pointerup', onUp);
+    const onKey = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      if (e.key !== 'Escape' || t?.closest('input, textarea, select')) return;
+      dismissRef.current();
+    };
+    window.addEventListener('keydown', onKey);
+
+    // Per-frame: twinkle, keep the hover card pinned to its dot.
     let raf = 0;
     const tick = () => {
       raf = requestAnimationFrame(tick);
       sky.update(performance.now() / 1000);
-      controls.autoRotate = !selectedRef.current && !hoverRef.current && performance.now() - lastInteractRef.current > IDLE_BEFORE_SPIN_MS;
       const pin = hoverRef.current;
       const card = cardRef.current;
       const leader = leaderRef.current;
@@ -462,6 +455,9 @@ export default function GlobePage() {
     return () => {
       cancelAnimationFrame(raf);
       ro.disconnect();
+      mount.removeEventListener('pointerdown', onDown);
+      mount.removeEventListener('pointerup', onUp);
+      window.removeEventListener('keydown', onKey);
       sky.dispose();
       g.pauseAnimation();
       g._destructor();
@@ -481,18 +477,44 @@ export default function GlobePage() {
 
   useEffect(() => {
     creationsRef.current = creations;
-    globeRef.current?.arcsData(buildArcs(creations));
   }, [creations]);
 
   const openCountry = selected?.properties.name;
   useEffect(() => {
     const g = globeRef.current;
     if (!g) return;
-    // Pin elements are rebuilt, so any open card would point at a stale pin.
-    hoverRef.current = null;
-    setHover(null);
-    g.htmlElementsData(buildPins(creations, creationCountry, clustered, openCountry));
-  }, [creations, creationCountry, clustered, openCountry]);
+    // Only crafts are pinned; community creations are listed in the country panel instead.
+    const pins = buildPins([], new Map(), clustered, openCountry);
+    g.htmlElementsData(pins);
+    // Pin objects are rebuilt: keep an open card on its new pin, or close it if that pin is gone.
+    // A craft picked from search only gets a pin once we've landed in its country.
+    const pending = pendingCraftRef.current;
+    if (pending && pending.country === openCountry) pendingCraftRef.current = null;
+    const wantId = pending && pending.country === openCountry ? `craft-${pending.id}` : hoverRef.current?.id;
+    const next = wantId ? pins.find((p) => p.id === wantId) : undefined;
+    if (next) showCard(next);
+    else {
+      hoverRef.current = null;
+      setHover(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clustered, openCountry]);
+
+  // Search results arrive as `/?country=…` or `/?craft=…`.
+  useEffect(() => {
+    const country = searchParams.get('country');
+    const craft = searchParams.get('craft') ? craftById(searchParams.get('craft')!) : undefined;
+    if (!country && !craft) return;
+    setSearchParams({}, { replace: true });
+    if (craft) {
+      pendingCraftRef.current = craft;
+      if (selectedRef.current?.properties.name === craft.country) {
+        pendingCraftRef.current = null;
+        focusCraft(craft);
+      } else landIn(craft.country);
+    } else if (country) landIn(country);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   const here = useMemo(() => {
     if (!selected) return null;
@@ -522,9 +544,7 @@ export default function GlobePage() {
           </p>
           <ul className="globe-legend">
             <li><span className="lg lg-playable" />playable craft</li>
-            <li><span className="lg lg-soon" />craft to come</li>
-            <li><span className="lg lg-creation" />community creation</li>
-            <li><span className="lg lg-arc" />learned from</li>
+            {CRAFTS.some((c) => c.status === 'soon') && <li><span className="lg lg-soon" />craft to come</li>}
           </ul>
         </div>
       )}
@@ -590,7 +610,7 @@ export default function GlobePage() {
         )}
       </div>
 
-      <div className="globe-hint">drag to spin · scroll to zoom · click a country to land</div>
+      <div className="globe-hint">drag to spin · scroll to zoom · click a country to land · esc to zoom out</div>
 
       <button className="globe-about-toggle" onClick={() => setAboutOpen((o) => !o)}>
         {aboutOpen ? 'close' : 'how Senecai works'}
@@ -600,7 +620,7 @@ export default function GlobePage() {
           <ol>
             <li><b>Your hands.</b> Rokoko Smartgloves, or a webcam emulator that streams the exact same JSON v3 frames.</li>
             <li><b>Retargeting.</b> About twenty human finger joints become the six motors of an Inspire-style robot hand, calibrated to you.</li>
-            <li><b>The robot crafts.</b> Plucking a kantele or carving a kuksa in a simulated workshop, ready to mirror to real hardware.</li>
+            <li><b>The robot crafts.</b> Plucking a kantele, or forging a puukko and carving its handle, in a simulated workshop, ready to mirror to real hardware.</li>
             <li><b>Demonstrations.</b> Every creation is a tutorial for people, and training data for robots.</li>
           </ol>
         </div>

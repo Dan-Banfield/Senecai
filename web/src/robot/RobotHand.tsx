@@ -47,7 +47,7 @@ function useMaterials(ghost: boolean) {
     }
     return {
       shell: new THREE.MeshStandardMaterial({ color: '#d9d4cc', metalness: 0.35, roughness: 0.4 }),
-      joint: new THREE.MeshStandardMaterial({ color: '#c87941', metalness: 0.8, roughness: 0.3 }),
+      joint: new THREE.MeshStandardMaterial({ color: '#2f6b3a', metalness: 0.8, roughness: 0.3 }),
       pad: new THREE.MeshStandardMaterial({ color: '#2a2e31', metalness: 0.1, roughness: 0.85 }),
       accent: new THREE.MeshStandardMaterial({ color: '#3a4146', metalness: 0.6, roughness: 0.35 }),
     };

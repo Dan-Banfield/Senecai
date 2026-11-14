@@ -21,14 +21,17 @@ export function KantelePage() {
   useEffect(() => {
     if (!fromId) return setFromCreation(null);
     void community.get(fromId).then((c) => {
-      if (c?.craft === 'kantele') {
+      if (c?.craft === 'kantele' && c.recording.version === 1) {
         setFromCreation(c);
         setLessonId(`creation-${c.id}`);
       }
     });
   }, [fromId]);
 
-  const lessons: Lesson[] = useMemo(() => (fromCreation ? [lessonFromRecording(fromCreation), ...LESSONS] : LESSONS), [fromCreation]);
+  const lessons: Lesson[] = useMemo(
+    () => (fromCreation && fromCreation.recording.version === 1 ? [lessonFromRecording({ ...fromCreation, recording: fromCreation.recording }), ...LESSONS] : LESSONS),
+    [fromCreation],
+  );
   const lesson = lessons.find((l) => l.id === lessonId) ?? lessons[0];
 
   const session = useMemo(() => new KanteleSession(mode === 'play' ? { kind: 'free' } : { kind: 'lesson', lesson }), [mode, lesson]);

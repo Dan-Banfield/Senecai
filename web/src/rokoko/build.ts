@@ -80,7 +80,7 @@ export function buildFrame(hands: HandPoseSpec[], timestamp: number, actorName =
   const has = (s: Side) => hands.some((h) => h.side === s);
   const actor: ActorFrame = {
     name: actorName,
-    color: [200, 121, 65],
+    color: [47, 107, 58],
     meta: { hasGloves: hands.length > 0, hasLeftGlove: has('left'), hasRightGlove: has('right'), hasBody: false, hasFace: false },
     dimensions: { totalHeight: 1.8, hipHeight: 0.95 },
     body,

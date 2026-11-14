@@ -38,7 +38,7 @@ export function WebcamPreview() {
       const res = src.lastResult;
       res?.landmarks.forEach((lm, i) => {
         const right = res.handedness[i]?.[0]?.categoryName !== 'Left';
-        ctx.strokeStyle = right ? '#e0965c' : '#7fd1e8';
+        ctx.strokeStyle = right ? '#5fa36b' : '#7fd1e8';
         ctx.lineWidth = 2.5;
         for (const [a, b] of BONES) {
           ctx.beginPath();

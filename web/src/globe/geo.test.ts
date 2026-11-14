@@ -41,7 +41,7 @@ describe('globe geography', () => {
     const seeds = generateSeeds();
     const ids = new Set(seeds.map((s) => s.id));
     const learned = seeds.filter((s) => s.learnedFrom);
-    expect(learned.length).toBeGreaterThanOrEqual(3);
+    expect(learned.length).toBeGreaterThanOrEqual(2);
     for (const s of learned) expect(ids).toContain(s.learnedFrom!.id);
   });
 });

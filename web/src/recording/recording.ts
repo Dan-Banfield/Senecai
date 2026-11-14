@@ -4,11 +4,15 @@
 // tutorials, and the exportable training dataset.
 
 import * as THREE from 'three';
+import type { BenchCraftId } from '../bench/core';
 import type { RobotPose } from '../robot/RobotHand';
 import type { Dof6 } from '../robot/retarget';
 import type { Side } from '../rokoko/types';
 
-export type CraftId = 'kantele' | 'kuksa';
+/** Every craft with a playable page. Kantele records v1 recordings; the rest are workbench (v2) crafts. */
+export type CraftId = 'kantele' | BenchCraftId;
+/** Crafts that used the original (v1) recording format. */
+export type LegacyCraftId = 'kantele';
 
 export interface RecHand {
   side: Side;
@@ -27,7 +31,7 @@ export type RecEvent =
 
 export interface Recording {
   version: 1;
-  craft: CraftId;
+  craft: LegacyCraftId;
   source: string;
   durationMs: number;
   frames: RecFrame[];
@@ -44,7 +48,7 @@ export class Recorder {
   active = false;
 
   constructor(
-    private craft: CraftId,
+    private craft: LegacyCraftId,
     private source: string,
     private sampleHz = 30,
   ) {}

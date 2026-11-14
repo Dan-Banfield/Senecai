@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { community, type Creation } from '../community/api';
+import { craftById, CRAFTS } from '../crafts/catalog';
 import type { CraftId } from '../recording/recording';
 import { CreationThumb } from '../ui/Thumbnails';
 
@@ -44,11 +45,17 @@ export function CommunityPage() {
           <h1>Community</h1>
           <p>Every creation is a recording of real hand movements. Watch the robot replay it, or turn it into a tutorial and learn it yourself.</p>
         </div>
-        <div className="tabs" style={{ minWidth: 300 }}>
-          <button className={!filter ? 'on' : ''} onClick={() => setFilter(undefined)}>All</button>
-          <button className={filter === 'kantele' ? 'on' : ''} onClick={() => setFilter('kantele')}>Kantele</button>
-          <button className={filter === 'kuksa' ? 'on' : ''} onClick={() => setFilter('kuksa')}>Kuksa</button>
-        </div>
+        <label className="field" style={{ minWidth: 240 }}>
+          Craft
+          <select value={filter ?? ''} onChange={(e) => setFilter((e.target.value || undefined) as CraftId | undefined)}>
+            <option value="">All crafts</option>
+            {CRAFTS.filter((c) => c.status === 'playable').map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
       {!items ? (
         <div className="empty">Loading…</div>
@@ -61,7 +68,7 @@ export function CommunityPage() {
               </div>
               <div className="info">
                 <div>
-                  <span className="tag">{c.craft}</span>
+                  <span className="tag">{craftById(c.craft)?.name ?? c.craft}</span>
                   {c.score !== undefined && <span className="tag">score {c.score}</span>}
                   {c.learnedFrom && <span className="tag">remix</span>}
                 </div>

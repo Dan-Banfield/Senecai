@@ -4,13 +4,26 @@ import type { Feature, MultiPolygon, Polygon, Position } from 'geojson';
 import { feature } from 'topojson-client';
 import type { GeometryCollection, Topology } from 'topojson-specification';
 import countries110 from 'world-atlas/countries-110m.json';
+import countries50 from 'world-atlas/countries-50m.json';
 
 export type CountryFeature = Feature<Polygon | MultiPolygon, { name: string }>;
 
+type CountriesTopo = Topology<{ countries: GeometryCollection<{ name: string }> }>;
+const toFeatures = (t: unknown) => {
+  const topo = t as CountriesTopo;
+  return feature(topo, topo.objects.countries).features as CountryFeature[];
+};
+
+/**
+ * The coarse 110m map keeps the globe light, but leaves out small countries
+ * (Singapore, Malta, Bahrain…). Those are filled in from the 50m map so every
+ * country can be searched, clicked and landed on.
+ */
 export function loadCountries(): CountryFeature[] {
-  const topo = countries110 as unknown as Topology<{ countries: GeometryCollection<{ name: string }> }>;
-  const fc = feature(topo, topo.objects.countries);
-  return (fc.features as CountryFeature[]).filter((f) => f.properties.name !== 'Antarctica');
+  const coarse = toFeatures(countries110).filter((f) => f.properties.name !== 'Antarctica');
+  const have = new Set(coarse.map((f) => f.properties.name));
+  const small = toFeatures(countries50).filter((f) => !have.has(f.properties.name) && f.properties.name !== 'Antarctica');
+  return [...coarse, ...small];
 }
 
 const RAD = Math.PI / 180;

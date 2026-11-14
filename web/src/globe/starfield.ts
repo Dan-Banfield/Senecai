@@ -105,7 +105,7 @@ export function createStarfield({ count = 9000, radius = 30000 } = {}) {
 
   // Nebula glows along the band.
   const tex = glowTexture();
-  const tints = ['#3e7c8c', '#5d4a86', '#c87941', '#2f5f7a', '#7a5a9a', '#3e7c8c'];
+  const tints = ['#3e7c8c', '#5d4a86', '#2f6b3a', '#2f5f7a', '#7a5a9a', '#3e7c8c'];
   tints.forEach((tint, i) => {
     const a = (i / tints.length) * Math.PI * 2 + Math.random() * 0.6;
     const dir = bandU.clone().multiplyScalar(Math.cos(a)).addScaledVector(bandV, Math.sin(a)).addScaledVector(bandNormal, gaussian() * 0.05).normalize();

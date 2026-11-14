@@ -6,7 +6,7 @@ export function NoInputCard() {
   const setPanelOpen = usePipeline((s) => s.setPanelOpen);
   if (kind) return null;
   return (
-    <div className="card" style={{ borderColor: 'var(--copper)' }}>
+    <div className="card" style={{ borderColor: 'var(--forest)' }}>
       <h3>Connect your hands</h3>
       <p>No gloves yet? Use your webcam as a glove emulator. It streams the same Rokoko data format.</p>
       <div className="row" style={{ marginTop: 12 }}>

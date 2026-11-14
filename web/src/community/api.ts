@@ -3,6 +3,8 @@
 // artificial latency so the UI behaves as it would against a real API. Swap
 // MockCommunityApi for an HTTP implementation of CommunityApi later.
 
+import { isBenchCraft } from '../bench/crafts';
+import type { BenchRecording } from '../bench/recording';
 import type { CraftId, Recording } from '../recording/recording';
 import type { GeoPoint } from './places';
 import { generateSeeds } from './seed';
@@ -16,9 +18,10 @@ export interface Creation {
   createdAt: string;
   likes: number;
   liked?: boolean;
-  recording: Recording;
-  /** Kuksa only: final carved shape (RLE-encoded voxel grid). */
-  shape?: string;
+  /** Kantele: v1 recording. Workbench crafts: v2 bench recording (robot frames plus workpiece ops). */
+  recording: Recording | BenchRecording;
+  /** Snapshot of the finished piece (JPEG data URL), for workbench crafts. */
+  thumb?: string;
   score?: number;
   seeded?: boolean;
   /** Set when this creation was made by following another one's tutorial. */
@@ -27,7 +30,7 @@ export interface Creation {
   location?: GeoPoint;
 }
 
-export type NewCreation = Pick<Creation, 'craft' | 'title' | 'author' | 'description' | 'recording' | 'shape' | 'score' | 'learnedFrom' | 'location'>;
+export type NewCreation = Pick<Creation, 'craft' | 'title' | 'author' | 'description' | 'recording' | 'thumb' | 'score' | 'learnedFrom' | 'location'>;
 
 export interface CommunityApi {
   list(filter?: { craft?: CraftId }): Promise<Creation[]>;
@@ -72,7 +75,14 @@ class MockCommunityApi implements CommunityApi {
   }
   private all(): Creation[] {
     const liked = this.likes();
-    return [...this.readUser(), ...this.getSeeds()].map((c) => ({ ...c, liked: !!liked[c.id], likes: c.likes + (liked[c.id] ? 1 : 0) }));
+    return [...this.readUser(), ...this.getSeeds()]
+      // Creations saved for crafts that have since been removed can't be replayed; skip them.
+      .filter((c) => c.craft === 'kantele' || isBenchCraft(c.craft))
+      .map((c) => ({
+        ...c,
+        liked: !!liked[c.id],
+        likes: c.likes + (liked[c.id] ? 1 : 0),
+      }));
   }
 
   async list(filter?: { craft?: CraftId }) {

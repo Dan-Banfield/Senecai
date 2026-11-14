@@ -1,18 +1,22 @@
 // Keyboard + mouse emulator, for when there's no camera (or for quick testing).
+// Right (working) hand:
 //   A S D F G  = curl thumb, index, middle, ring, little (hold)
 //   H          = thumb opposition
 //   Space      = make a fist
 //   Mouse      = move the hand, wheel = depth
+// Left (other) hand, resting in front of you:
+//   Z          = close / open its fist (toggle)
+//   Arrow keys = turn its wrist (left/right, tip up/down)
 // It still emits Rokoko JSON v3 frames, built with forward kinematics.
 
-import { Quaternion, Vector3 } from 'three';
+import { Euler, Quaternion, Vector3 } from 'three';
 import { buildFrame } from '../rokoko/build';
 import type { RokokoFrame } from '../rokoko/types';
 import type { HandSource, SourceStatus } from './types';
 
 const FINGER_KEYS = ['a', 's', 'd', 'f', 'g'];
 
-export const KEYBOARD_HELP = 'A S D F G = thumb…little · Space = fist · H = thumb across palm · mouse = move hand';
+export const KEYBOARD_HELP = 'A S D F G = thumb…little · Space = fist · H = thumb across palm · mouse = move hand · Z = left fist · arrows = turn left wrist';
 
 export class KeyboardSource implements HandSource {
   readonly kind = 'keyboard' as const;
@@ -21,6 +25,10 @@ export class KeyboardSource implements HandSource {
   private thumbRotate = 0;
   private mouse = { x: 0.5, y: 0.5 };
   private depth = 0;
+  private leftFist = false;
+  private leftCurl = 0;
+  private leftYaw = 0;
+  private leftPitch = 0;
   private timer = 0;
   private cleanup: (() => void) | null = null;
 
@@ -31,8 +39,10 @@ export class KeyboardSource implements HandSource {
     };
     const kd = (e: KeyboardEvent) => {
       if (typing(e)) return;
-      if (e.key === ' ') e.preventDefault();
-      this.down.add(e.key.toLowerCase());
+      if (e.key === ' ' || e.key.startsWith('Arrow')) e.preventDefault();
+      const k = e.key.toLowerCase();
+      if (k === 'z' && !e.repeat) this.leftFist = !this.leftFist;
+      this.down.add(k);
     };
     const ku = (e: KeyboardEvent) => this.down.delete(e.key.toLowerCase());
     const mm = (e: MouseEvent) => (this.mouse = { x: e.clientX / window.innerWidth, y: e.clientY / window.innerHeight });
@@ -58,6 +68,13 @@ export class KeyboardSource implements HandSource {
       const fist = this.down.has(' ');
       this.curl = this.curl.map((c, i) => ease(c, fist || this.down.has(FINGER_KEYS[i]) ? 1 : 0, 18));
       this.thumbRotate = ease(this.thumbRotate, fist || this.down.has('h') ? 1 : 0, 12);
+      this.leftCurl = ease(this.leftCurl, this.leftFist ? 1 : 0, 14);
+      const turn = 1.5 * dt;
+      if (this.down.has('arrowleft')) this.leftYaw = Math.min(1.4, this.leftYaw + turn);
+      if (this.down.has('arrowright')) this.leftYaw = Math.max(-1.4, this.leftYaw - turn);
+      if (this.down.has('arrowup')) this.leftPitch = Math.min(1.3, this.leftPitch + turn);
+      if (this.down.has('arrowdown')) this.leftPitch = Math.max(-1.3, this.leftPitch - turn);
+      const lc = this.leftCurl;
       const frame = buildFrame(
         [
           {
@@ -66,6 +83,13 @@ export class KeyboardSource implements HandSource {
             wristRotation: new Quaternion(),
             curl: this.curl as [number, number, number, number, number],
             thumbRotate: this.thumbRotate,
+          },
+          {
+            side: 'left',
+            wristPosition: new Vector3(-0.2, 1.15, 0.3),
+            wristRotation: new Quaternion().setFromEuler(new Euler(this.leftPitch, this.leftYaw, 0, 'YXZ')),
+            curl: [lc, lc, lc, lc, lc],
+            thumbRotate: lc,
           },
         ],
         performance.now() / 1000,

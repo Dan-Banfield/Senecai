@@ -50,7 +50,7 @@ export function ShareDialog({ draft, onClose }: { draft: Omit<NewCreation, 'titl
         <p style={{ margin: 0, color: 'var(--birch-dim)' }}>Others can replay your robot's movements and learn your creation as a tutorial. It's also saved as a teleoperation demonstration that a robot can learn from.</p>
         <label className="field">
           Title
-          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={draft.craft === 'kantele' ? 'e.g. Song for the first snow' : 'e.g. My first kuksa'} autoFocus />
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={draft.craft === 'kantele' ? 'e.g. Song for the first snow' : 'e.g. My first puukko'} autoFocus />
         </label>
         <label className="field">
           Your name

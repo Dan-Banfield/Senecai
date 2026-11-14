@@ -1,12 +1,11 @@
-import { useMemo } from 'react';
 import type { Creation } from '../community/api';
-import { decodeShape, DIM } from '../crafts/kuksa/voxels';
+import { craftById } from '../crafts/catalog';
 
 const NOTE_COLORS = ['#e9b872', '#9ad1c3', '#f2ede4', '#b7c4e8', '#e8a0a0'];
 
 /** Piano-roll of the plucks. */
 export function KanteleThumb({ creation, width = 260, height = 120 }: { creation: Creation; width?: number; height?: number }) {
-  const plucks = creation.recording.events.filter((e) => e.type === 'pluck');
+  const plucks = creation.recording.version === 1 ? creation.recording.events.filter((e) => e.type === 'pluck') : [];
   const dur = Math.max(1, creation.recording.durationMs);
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
@@ -20,45 +19,9 @@ export function KanteleThumb({ creation, width = 260, height = 120 }: { creation
   );
 }
 
-/** Side silhouette + top view of the carved shape. */
-export function KuksaThumb({ shape, width = 260, height = 120 }: { shape: string; width?: number; height?: number }) {
-  const { side, top } = useMemo(() => {
-    const g = decodeShape(shape);
-    const side: boolean[][] = [];
-    const top: number[][] = [];
-    for (let y = 0; y < DIM.y; y++) {
-      side[y] = [];
-      for (let x = 0; x < DIM.x; x++) {
-        let any = false;
-        for (let z = 0; z < DIM.z && !any; z++) any = !!g.get(x, y, z);
-        side[y][x] = any;
-      }
-    }
-    for (let z = 0; z < DIM.z; z++) {
-      top[z] = [];
-      for (let x = 0; x < DIM.x; x++) {
-        let h = -1;
-        for (let y = DIM.y - 1; y >= 0 && h < 0; y--) if (g.get(x, y, z)) h = y;
-        top[z][x] = h;
-      }
-    }
-    return { side, top };
-  }, [shape]);
-  const cs = Math.min((width / 2 - 16) / DIM.x, (height - 16) / Math.max(DIM.y, DIM.z));
-  return (
-    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`}>
-      <g transform={`translate(8, ${(height - DIM.y * cs) / 2})`}>
-        {side.map((row, y) => row.map((on, x) => (on ? <rect key={`${x}-${y}`} x={x * cs} y={(DIM.y - 1 - y) * cs} width={cs + 0.3} height={cs + 0.3} fill="#e1c79a" /> : null)))}
-      </g>
-      <g transform={`translate(${width / 2 + 8}, ${(height - DIM.z * cs) / 2})`}>
-        {top.map((row, z) =>
-          row.map((h, x) => (h >= 0 ? <rect key={`${x}-${z}`} x={x * cs} y={z * cs} width={cs + 0.3} height={cs + 0.3} fill={`hsl(35, 45%, ${28 + (h / DIM.y) * 52}%)`} /> : null)),
-        )}
-      </g>
-    </svg>
-  );
-}
-
 export function CreationThumb({ creation }: { creation: Creation }) {
-  return creation.craft === 'kuksa' && creation.shape ? <KuksaThumb shape={creation.shape} /> : <KanteleThumb creation={creation} />;
+  if (creation.thumb) return <img className="thumb-img" src={creation.thumb} alt="" />;
+  if (creation.recording.version === 1) return <KanteleThumb creation={creation} />;
+  const photo = craftById(creation.craft)?.image.src;
+  return photo ? <img className="thumb-img" src={photo} alt="" /> : null;
 }

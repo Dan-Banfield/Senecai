@@ -9,7 +9,6 @@ coverage/
 
 # Assets fetched/copied by web/scripts/fetch-assets.mjs on `npm run dev`
 web/public/mediapipe/
-web/public/globe/
 
 # Logs
 *.log
