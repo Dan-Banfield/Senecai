@@ -57,6 +57,8 @@ function calibrationFor(kind: SourceKind, stored?: Calibration): Calibration {
   if (!stored && kind === 'webcam') {
     cal.positionScale = 0.2;
   }
+  // Glove yaw has an arbitrary zero (magnetic north), so start from wherever the hand is.
+  if (kind === 'gloves') cal.autoNeutral = true;
   return cal;
 }
 

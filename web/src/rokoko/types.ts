@@ -35,6 +35,11 @@ export interface ActorFrame {
   meta: ActorMeta;
   dimensions?: { totalHeight: number; hipHeight: number };
   body: Partial<Record<string, JointFrame>>;
+  /**
+   * Senecai extension, added by our bridge for Rokoko Device SDK frames (Studio never sends it).
+   * "wrist-relative": hand positions carry no world position (no Coil Pro).
+   */
+  senecai?: { positions?: string };
 }
 
 export interface RokokoFrame {

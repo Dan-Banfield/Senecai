@@ -9,6 +9,7 @@ import { wristForTip } from '../crafts/kuksa/session';
 import { analyseTarget, CELLS, cellToLocal, coords, DIM, encodeShape, makeTarget, type KuksaParams, DEFAULT_KUKSA } from '../crafts/kuksa/voxels';
 import type { RecEvent, RecFrame, Recording } from '../recording/recording';
 import type { Creation } from './api';
+import type { GeoPoint } from './places';
 
 const daysAgo = (d: number, h = 0) => new Date(Date.now() - (d * 24 + h) * 3600_000).toISOString();
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
@@ -84,38 +85,67 @@ function kuksaRecording(params: KuksaParams) {
   return { recording, shape: encodeShape(target) };
 }
 
-export function generateSeeds(): Creation[] {
-  const k = (id: string, title: string, author: string, description: string, created: string, likes: number, rec: Recording): Creation => ({
-    id,
-    craft: 'kantele',
-    title,
-    author,
-    description,
-    createdAt: created,
-    likes,
-    recording: rec,
-    seeded: true,
-  });
-  const v = (id: string, title: string, author: string, description: string, created: string, likes: number, params: KuksaParams, score: number): Creation => ({
-    id,
-    craft: 'kuksa',
-    title,
-    author,
-    description,
-    createdAt: created,
-    likes,
-    score,
-    seeded: true,
-    ...kuksaRecording(params),
-  });
+interface SeedMeta {
+  id: string;
+  title: string;
+  author: string;
+  description: string;
+  createdAt: string;
+  likes: number;
+  location: GeoPoint;
+  learnedFrom?: string;
+}
 
-  return [
-    k('seed-dawn', 'Päijänne at dawn', 'Aino K.', 'Slow rising arpeggios, like mist lifting off the lake. Good one for practising the ring finger.', daysAgo(0, 3), 41, kanteleRecording(72, [0, 2, 4, 2, 1, 3, 4, 3, 0, 2, 4, 3, 2, 1, 0, null])),
-    v('seed-classic', 'Classic kuksa with finger hole', 'Juhani R.', 'The shape my grandfather carved: deep bowl and a short handle with a hole for two fingers. Hollow it in light passes!', daysAgo(0, 9), 63, DEFAULT_KUKSA, 96),
-    k('seed-runo', 'Runo for my grandmother', 'Väinö L.', 'A runo-style tune in five beats. She used to sing something like this while weaving.', daysAgo(1, 2), 87, kanteleRecording(92, [0, 1, 2, 2, 3, 2, 1, 1, 0, null, 2, 3, 4, 4, 3, 2, 1, 1, 0, null, 0, 1, 2, 2, 3, 2, 1, 1, 0, null])),
-    v('seed-coffee', 'Deep coffee kuksa', 'Inkeri S.', 'Extra-deep bowl for campfire coffee, with a plain tab handle. The hollowing takes patience.', daysAgo(2, 5), 29, { ...DEFAULT_KUKSA, rx: 9, rz: 9, depth: 17, handleLen: 7, hole: false }, 91),
-    k('seed-polka', 'Sauna polka', 'Eero M.', 'Bouncy two-finger chords. Try it fast!', daysAgo(3, 1), 54, kanteleRecording(132, [[0, 2], 4, [1, 3], 4, [0, 2], 4, [1, 3], 2, [0, 2], 4, [1, 3], 4, [2, 4], 3, [0, 2], null])),
-    v('seed-berry', 'Wide berry-picking cup', 'Lassi P.', 'A shallow, wide cup for bilberries. Easier to hollow, harder to keep the wall even.', daysAgo(4, 7), 18, { ...DEFAULT_KUKSA, rx: 12, rz: 11, depth: 12, handleLen: 6 }, 88),
-    k('seed-aurora', 'Revontulet loop', 'Saga N.', 'A looping pattern that shimmers like the northern lights. Hypnotic on the robot hand.', daysAgo(6), 72, kanteleRecording(108, [4, 2, 3, 1, 2, 0, 1, 2, 4, 2, 3, 1, 2, 0, 1, 0])),
-  ];
+const at = (place: string, lat: number, lng: number): GeoPoint => ({ place, lat, lng, country: place.split(', ')[1]?.replace('UK', 'United Kingdom') });
+
+export function generateSeeds(): Creation[] {
+  const k = (m: SeedMeta, rec: Recording): Creation => ({ ...m, learnedFrom: undefined, craft: 'kantele', recording: rec, seeded: true });
+  const v = (m: SeedMeta, params: KuksaParams, score: number): Creation => ({ ...m, learnedFrom: undefined, craft: 'kuksa', score, seeded: true, ...kuksaRecording(params) });
+
+  const runo = [0, 1, 2, 2, 3, 2, 1, 1, 0, null];
+  const runoB = [2, 3, 4, 4, 3, 2, 1, 1, 0, null];
+  const metas: [SeedMeta, () => Creation][] = [];
+  const add = (m: SeedMeta, make: (m: SeedMeta) => Creation) => metas.push([m, () => make(m)]);
+
+  add({ id: 'seed-dawn', title: 'Päijänne at dawn', author: 'Aino K.', description: 'Slow rising arpeggios, like mist lifting off the lake. Good one for practising the ring finger.', createdAt: daysAgo(0, 3), likes: 41, location: at('Jyväskylä, Finland', 62.24, 25.75) }, (m) =>
+    k(m, kanteleRecording(72, [0, 2, 4, 2, 1, 3, 4, 3, 0, 2, 4, 3, 2, 1, 0, null])),
+  );
+  add({ id: 'seed-classic', title: 'Classic kuksa with finger hole', author: 'Juhani R.', description: 'The shape my grandfather carved: deep bowl and a short handle with a hole for two fingers. Hollow it in light passes!', createdAt: daysAgo(0, 9), likes: 63, location: at('Inari, Finland', 68.91, 27.03) }, (m) =>
+    v(m, DEFAULT_KUKSA, 96),
+  );
+  add({ id: 'seed-runo', title: 'Runo for my grandmother', author: 'Väinö L.', description: 'A runo-style tune in five beats. She used to sing something like this while weaving.', createdAt: daysAgo(1, 2), likes: 87, location: at('Joensuu, Finland', 62.6, 29.76) }, (m) =>
+    k(m, kanteleRecording(92, [...runo, ...runoB, ...runo])),
+  );
+  add({ id: 'seed-kyoto', title: 'First kantele, far from home', author: 'Hana S.', description: "Learned Väinö's runo through the ghost hand, then slowed it down. Five strings feel a little like a koto.", createdAt: daysAgo(0, 6), likes: 34, location: at('Kyoto, Japan', 35.01, 135.77), learnedFrom: 'seed-runo' }, (m) =>
+    k(m, kanteleRecording(76, [...runo, ...runo])),
+  );
+  add({ id: 'seed-coffee', title: 'Deep coffee kuksa', author: 'Inkeri S.', description: 'Extra-deep bowl for campfire coffee, with a plain tab handle. The hollowing takes patience.', createdAt: daysAgo(2, 5), likes: 29, location: at('Rovaniemi, Finland', 66.5, 25.73) }, (m) =>
+    v(m, { ...DEFAULT_KUKSA, rx: 9, rz: 9, depth: 17, handleLen: 7, hole: false }, 91),
+  );
+  add({ id: 'seed-edinburgh', title: 'Hebridean kuksa', author: 'Callum M.', description: "Followed Juhani's classic, then made the handle longer for a gloved hand. Birch is scarce here, so the virtual burl was a treat.", createdAt: daysAgo(1, 8), likes: 22, location: at('Edinburgh, UK', 55.95, -3.19), learnedFrom: 'seed-classic' }, (m) =>
+    v(m, { ...DEFAULT_KUKSA, rx: 9.5, rz: 9, depth: 14, handleLen: 10, handleWidth: 3.2 }, 84),
+  );
+  add({ id: 'seed-polka', title: 'Sauna polka', author: 'Eero M.', description: 'Bouncy two-finger chords. Try it fast!', createdAt: daysAgo(3, 1), likes: 54, location: at('Tampere, Finland', 61.5, 23.76) }, (m) =>
+    k(m, kanteleRecording(132, [[0, 2], 4, [1, 3], 4, [0, 2], 4, [1, 3], 2, [0, 2], 4, [1, 3], 4, [2, 4], 3, [0, 2], null])),
+  );
+  add({ id: 'seed-kannel', title: 'Kannel echoes', author: 'Mari T.', description: "Tuned to the same five notes as my grandmother's kannel. The kantele and kannel are cousins, and the robot hand doesn't mind which.", createdAt: daysAgo(2, 1), likes: 38, location: at('Tallinn, Estonia', 59.44, 24.75) }, (m) =>
+    k(m, kanteleRecording(84, [0, 1, 2, 1, 0, null, 2, 3, 4, 3, 2, null, 4, 3, 2, 1, 0, null])),
+  );
+  add({ id: 'seed-berry', title: 'Wide berry-picking cup', author: 'Lassi P.', description: 'A shallow, wide cup for bilberries. Easier to hollow, harder to keep the wall even.', createdAt: daysAgo(4, 7), likes: 18, location: at('Kuusamo, Finland', 65.96, 29.19) }, (m) =>
+    v(m, { ...DEFAULT_KUKSA, rx: 12, rz: 11, depth: 12, handleLen: 6 }, 88),
+  );
+  add({ id: 'seed-lisbon', title: 'Fado on five strings', author: 'Inês R.', description: "Started from Aino's dawn piece and let it drift towards fado. Saudade, but Finnish.", createdAt: daysAgo(3, 4), likes: 27, location: at('Lisbon, Portugal', 38.72, -9.14), learnedFrom: 'seed-dawn' }, (m) =>
+    k(m, kanteleRecording(66, [4, 3, 2, 3, 1, null, 0, 2, 1, 0, null, 4, 2, 3, 1, 0, null])),
+  );
+  add({ id: 'seed-aurora', title: 'Revontulet loop', author: 'Saga N.', description: 'A looping pattern that shimmers like the northern lights. Hypnotic on the robot hand.', createdAt: daysAgo(6), likes: 72, location: at('Tromsø, Norway', 69.65, 18.96) }, (m) =>
+    k(m, kanteleRecording(108, [4, 2, 3, 1, 2, 0, 1, 2, 4, 2, 3, 1, 2, 0, 1, 0])),
+  );
+
+  const made = metas.map(([, make]) => make());
+  const byId = new Map(made.map((c) => [c.id, c]));
+  metas.forEach(([m], i) => {
+    const src = m.learnedFrom ? byId.get(m.learnedFrom) : undefined;
+    if (src) made[i].learnedFrom = { id: src.id, title: src.title, author: src.author };
+  });
+  return made;
 }

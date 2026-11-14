@@ -23,7 +23,7 @@ export class GlovesSource implements HandSource {
       onStatus({ state: 'starting', message: `Connecting to bridge at ${this.url}…` });
       const ws = new WebSocket(this.url);
       this.ws = ws;
-      ws.onopen = () => onStatus({ state: 'waiting', message: 'Bridge connected, waiting for Rokoko Studio to stream' });
+      ws.onopen = () => onStatus({ state: 'waiting', message: 'Bridge connected, waiting for gloves (Rokoko Device SDK or Studio)' });
       ws.onmessage = (ev) => {
         let msg: unknown;
         try {
@@ -32,7 +32,10 @@ export class GlovesSource implements HandSource {
           return;
         }
         if (!isRokokoFrame(msg)) return;
-        if (Date.now() - this.lastFrame > 1000) onStatus({ state: 'live', message: `Streaming from Rokoko Studio` });
+        if (Date.now() - this.lastFrame > 1000) {
+          const actor = msg.scene.actors[0]?.name ?? '';
+          onStatus({ state: 'live', message: actor === 'Rokoko Device SDK' ? 'Streaming from the Rokoko Device SDK' : `Streaming from Rokoko Studio (${actor || 'no actor'})` });
+        }
         this.lastFrame = Date.now();
         onFrame(msg);
       };
@@ -45,7 +48,7 @@ export class GlovesSource implements HandSource {
     connect();
     this.watchdog = window.setInterval(() => {
       if (this.ws?.readyState === WebSocket.OPEN && this.lastFrame && Date.now() - this.lastFrame > 1500) {
-        onStatus({ state: 'waiting', message: 'Bridge connected, but Rokoko Studio stopped streaming' });
+        onStatus({ state: 'waiting', message: 'Bridge connected, but the gloves stopped streaming' });
         this.lastFrame = 0;
       }
     }, 500);

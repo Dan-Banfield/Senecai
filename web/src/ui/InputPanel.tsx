@@ -5,7 +5,7 @@ import { SOURCE_LABELS, type SourceKind } from '../input/types';
 
 const SOURCES: { kind: SourceKind; icon: string; desc: string }[] = [
   { kind: 'webcam', icon: '📷', desc: 'Emulates the gloves with webcam hand tracking. Same Rokoko JSON v3 frames, no hardware.' },
-  { kind: 'gloves', icon: '🧤', desc: 'Rokoko Studio → bridge (npm run bridge) → here. Plug and play.' },
+  { kind: 'gloves', icon: '🧤', desc: 'Rokoko Device SDK (Linux, macOS, Windows) or Rokoko Studio → bridge (npm run bridge) → here.' },
   { kind: 'keyboard', icon: '⌨️', desc: KEYBOARD_HELP },
 ];
 

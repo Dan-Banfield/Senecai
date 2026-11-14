@@ -1,12 +1,14 @@
-import { useEffect } from 'react';
-import { BrowserRouter, Link, NavLink, Route, Routes } from 'react-router-dom';
+import { lazy, Suspense, useEffect } from 'react';
+import { BrowserRouter, Link, NavLink, Route, Routes, useLocation } from 'react-router-dom';
 import { usePipeline } from './input/pipeline';
 import { CommunityPage } from './pages/CommunityPage';
 import { CreationPage } from './pages/CreationPage';
-import { HomePage } from './pages/HomePage';
 import { KantelePage } from './pages/KantelePage';
 import { KuksaPage } from './pages/KuksaPage';
 import { InputPanel, SourcePill } from './ui/InputPanel';
+
+// The globe pulls in globe.gl and country data; only load it on the home page.
+const GlobePage = lazy(() => import('./pages/GlobePage'));
 
 function Brand() {
   return (
@@ -28,11 +30,10 @@ function useRestoreSource() {
   }, []);
 }
 
-export function App() {
-  useRestoreSource();
+function Shell() {
+  const home = useLocation().pathname === '/';
   return (
-    <BrowserRouter>
-      <div className="app">
+      <div className={`app ${home ? 'home' : ''}`}>
         <header className="header">
           <Brand />
           <nav className="nav">
@@ -44,16 +45,26 @@ export function App() {
           <SourcePill />
         </header>
         <main style={{ minHeight: 0, overflow: 'hidden' }}>
+          <Suspense fallback={<div className="globe-loading">Loading the world…</div>}>
           <Routes>
-            <Route path="/" element={<HomePage />} />
+            <Route path="/" element={<GlobePage />} />
             <Route path="/kantele" element={<KantelePage />} />
             <Route path="/kuksa" element={<KuksaPage />} />
             <Route path="/community" element={<CommunityPage />} />
             <Route path="/community/:id" element={<CreationPage />} />
           </Routes>
+          </Suspense>
         </main>
         <InputPanel />
       </div>
+  );
+}
+
+export function App() {
+  useRestoreSource();
+  return (
+    <BrowserRouter>
+      <Shell />
     </BrowserRouter>
   );
 }

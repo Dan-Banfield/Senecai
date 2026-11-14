@@ -20,6 +20,8 @@ export interface HumanHand {
 export interface HumanHands {
   actorName: string;
   timestamp: number;
+  /** True when the source has no world hand position (SDK gloves without a Coil Pro). */
+  positionsRelative?: boolean;
   left?: HumanHand;
   right?: HumanHand;
 }
@@ -71,6 +73,7 @@ export function parseFrame(frame: RokokoFrame, preferredActor?: string): HumanHa
   return {
     actorName: actor.name,
     timestamp: frame.scene.timestamp,
+    positionsRelative: actor.senecai?.positions === 'wrist-relative',
     left: parseHand(actor, 'left'),
     right: parseHand(actor, 'right'),
   };

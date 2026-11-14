@@ -4,6 +4,7 @@
 // MockCommunityApi for an HTTP implementation of CommunityApi later.
 
 import type { CraftId, Recording } from '../recording/recording';
+import type { GeoPoint } from './places';
 import { generateSeeds } from './seed';
 
 export interface Creation {
@@ -22,9 +23,11 @@ export interface Creation {
   seeded?: boolean;
   /** Set when this creation was made by following another one's tutorial. */
   learnedFrom?: { id: string; title: string; author: string };
+  /** Where it was made, for the globe. */
+  location?: GeoPoint;
 }
 
-export type NewCreation = Pick<Creation, 'craft' | 'title' | 'author' | 'description' | 'recording' | 'shape' | 'score' | 'learnedFrom'>;
+export type NewCreation = Pick<Creation, 'craft' | 'title' | 'author' | 'description' | 'recording' | 'shape' | 'score' | 'learnedFrom' | 'location'>;
 
 export interface CommunityApi {
   list(filter?: { craft?: CraftId }): Promise<Creation[]>;

@@ -46,11 +46,18 @@ export interface Calibration {
   mirrorX: boolean;
   /** Widen min/max automatically when the user exceeds them. */
   autoRange: boolean;
+  /**
+   * Without a calibrated neutral wrist pose, take the first frame's orientation as
+   * neutral. Used for gloves, whose yaw is relative to magnetic north (arbitrary zero).
+   */
+  autoNeutral?: boolean;
 }
 
 // thumbRotate raw = 3 - (thumbTip↔littleBase distance / palm width): bigger means more opposed.
 const DEFAULT_MIN: Dof6 = [1.1, 5, 15, 15, 15, 15];
 const DEFAULT_MAX: Dof6 = [2.1, 110, 220, 220, 220, 220];
+/** Pointer-style aiming: ~25° of wrist tilt reaches the edge of the workspace. */
+const AIM_GAIN = 2.4;
 
 export function defaultCalibration(center: Vec3 = { x: 0, y: 1.2, z: 0.3 }): Calibration {
   const side = (): SideCalibration => ({ min: [...DEFAULT_MIN], max: [...DEFAULT_MAX], center: { ...center } });
@@ -112,13 +119,14 @@ export class Retargeter {
         delete this.smooth[side];
         continue;
       }
-      out[side] = this.retargetHand(hand, now);
+      out[side] = this.retargetHand(hand, now, !!hands.positionsRelative);
     }
     return out;
   }
 
-  private retargetHand(hand: HumanHand, now: number): RobotHandCommand {
+  private retargetHand(hand: HumanHand, now: number, positionsRelative: boolean): RobotHandCommand {
     const cal = this.calibration[hand.side];
+    if (!cal.neutral && this.calibration.autoNeutral) cal.neutral = fromQ(hand.wristRotation);
     const raw = measure(hand, cal);
 
     if (this.calibration.autoRange) {
@@ -141,6 +149,13 @@ export class Retargeter {
     const neutral = cal.neutral ? toQ(cal.neutral) : new Quaternion();
     const delta = hand.wristRotation.clone().multiply(neutral.invert());
     const rot = rotationToThree(delta, this.calibration.mirrorX);
+
+    if (positionsRelative) {
+      // No world position: aim like a pointer instead. Where the fingers point (relative to
+      // neutral) moves the robot's wrist, so tilting/turning the hand steers the knife.
+      const pointing = new Vector3(0, 0, -1).applyQuaternion(rot);
+      pos.set(pointing.x * AIM_GAIN, pointing.y * AIM_GAIN, 0).clampScalar(-1.6, 1.6);
+    }
 
     let st = this.smooth[hand.side];
     if (!st) {
