@@ -134,8 +134,8 @@ export class KanteleSession {
     if (cmd) {
       this.setSide(cmd.side);
       const pos = HAND_BASE.clone().add(cmd.position.clone().multiplyScalar(0.12));
-      const rot = new THREE.Quaternion().slerp(cmd.rotation, 0.3);
-      this.livePose = { dof: cmd.dof, position: pos, rotation: rot };
+      const rot = cmd.absolute ? cmd.rotation.clone() : new THREE.Quaternion().slerp(cmd.rotation, 0.3);
+      this.livePose = { dof: cmd.dof, position: pos, rotation: rot, shape: cmd.shape };
       // The hand just (re)appeared: fingers already curled must not fire as rising edges.
       if (!this.hadCmd) this.detector.reset(cmd.dof);
       this.hadCmd = true;

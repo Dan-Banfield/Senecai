@@ -15,6 +15,8 @@ export interface HumanHand {
   thumbTip?: Vector3;
   indexBase?: Vector3;
   littleBase?: Vector3;
+  /** Per finger: positions of the Proximal, Medial and Distal joints and the Tip (Rokoko space). */
+  points?: Record<Finger, [Vector3, Vector3, Vector3, Vector3]>;
 }
 
 export interface HumanHands {
@@ -22,6 +24,11 @@ export interface HumanHands {
   timestamp: number;
   /** True when the source has no world hand position (SDK gloves without a Coil Pro). */
   positionsRelative?: boolean;
+  /**
+   * True when wrist orientations use OpenXR's hand frame in a gravity-aligned
+   * world (Rokoko Device SDK): fingers along -Z, back of the hand +Y, Y up.
+   */
+  framesOpenXR?: boolean;
   left?: HumanHand;
   right?: HumanHand;
 }
@@ -51,6 +58,9 @@ function parseHand(actor: ActorFrame, side: Side): HumanHand | undefined {
   const tip = b[fingerJoint(side, 'Thumb', 'Tip')];
   const ib = b[fingerJoint(side, 'Index', 'Proximal')];
   const lb = b[fingerJoint(side, 'Little', 'Proximal')];
+  let points: HumanHand['points'];
+  const all = FINGERS.map((f) => (['Proximal', 'Medial', 'Distal', 'Tip'] as const).map((ph) => b[fingerJoint(side, f, ph)]));
+  if (all.every((js) => js.every(Boolean))) points = Object.fromEntries(FINGERS.map((f, i) => [f, all[i].map((j) => vec(j!))])) as HumanHand['points'];
   return {
     side,
     wristPosition: vec(hand),
@@ -59,6 +69,7 @@ function parseHand(actor: ActorFrame, side: Side): HumanHand | undefined {
     thumbTip: tip && vec(tip),
     indexBase: ib && vec(ib),
     littleBase: lb && vec(lb),
+    points,
   };
 }
 
@@ -74,6 +85,7 @@ export function parseFrame(frame: RokokoFrame, preferredActor?: string): HumanHa
     actorName: actor.name,
     timestamp: frame.scene.timestamp,
     positionsRelative: actor.senecai?.positions === 'wrist-relative',
+    framesOpenXR: actor.senecai?.frames === 'openxr',
     left: parseHand(actor, 'left'),
     right: parseHand(actor, 'right'),
   };

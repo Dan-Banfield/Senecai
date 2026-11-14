@@ -1,6 +1,6 @@
 import type { RokokoFrame } from '../rokoko/types';
 
-export type SourceKind = 'webcam' | 'gloves' | 'keyboard';
+export type SourceKind = 'webcam' | 'gloves' | 'fused' | 'keyboard';
 
 export interface SourceStatus {
   state: 'idle' | 'starting' | 'live' | 'waiting' | 'error';
@@ -20,5 +20,6 @@ export interface HandSource {
 export const SOURCE_LABELS: Record<SourceKind, string> = {
   webcam: 'Webcam (glove emulator)',
   gloves: 'Rokoko Smartgloves',
+  fused: 'Gloves + webcam',
   keyboard: 'Keyboard + mouse',
 };

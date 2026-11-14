@@ -10,6 +10,7 @@
 import { Matrix4, Quaternion, Vector3 } from 'three';
 import { FINGERS, type Quat, type Side, type Vec3 } from '../rokoko/types';
 import { angleDeg, type HumanHand, type HumanHands } from '../rokoko/parse';
+import { handShape, type HandShape } from './handShape';
 
 export const DOF_NAMES = ['thumbRotate', 'thumbBend', 'index', 'middle', 'ring', 'little'] as const;
 export const DOF_LABELS = ['Thumb rot', 'Thumb bend', 'Index', 'Middle', 'Ring', 'Little'];
@@ -23,8 +24,16 @@ export interface RobotHandCommand {
   raw: Dof6;
   /** Wrist position in robot workspace (three.js axes, roughly -1..1). */
   position: Vector3;
-  /** Wrist orientation relative to the calibrated neutral pose (three.js axes). */
+  /**
+   * Wrist orientation (three.js axes). Relative to the calibrated neutral pose,
+   * or, when `absolute`, the hand's real orientation with only its compass heading
+   * zeroed, in the robot hand's frame (identity = palm down, fingers forward).
+   */
   rotation: Quaternion;
+  /** `rotation` is the hand's true orientation: show it on the robot as is. */
+  absolute?: boolean;
+  /** The hand's exact finger shape, for showing it one to one (see handShape.ts). */
+  shape?: HandShape;
   /** Mean curl of the four fingers. */
   grip: number;
 }
@@ -101,6 +110,21 @@ export function measure(hand: HumanHand, cal: SideCalibration): Dof6 {
   return [thumbRotate, flex(0, 1), flex(1, 0), flex(2, 0), flex(3, 0), flex(4, 0)];
 }
 
+const UP = new Vector3(0, 1, 0);
+const FORWARD = new Vector3(0, 0, -1);
+
+/**
+ * Compass heading of a hand (rotation about world Y that turns -Z onto the
+ * horizontal direction its fingers point). With the fingers pointing straight
+ * up or down, the knuckle line gives the heading instead.
+ */
+function headingOf(q: Quaternion) {
+  const f = FORWARD.clone().applyQuaternion(q);
+  if (Math.hypot(f.x, f.z) > 0.25) return Math.atan2(-f.x, -f.z);
+  const x = new Vector3(1, 0, 0).applyQuaternion(q);
+  return Math.atan2(-x.z, x.x);
+}
+
 /** Rokoko (left-handed, Y-up) -> three.js (right-handed, Y-up): reflect Z, optionally mirror X. */
 function rotationToThree(q: Quaternion, mirrorX: boolean): Quaternion {
   const m = new Matrix4().makeScale(mirrorX ? -1 : 1, 1, -1);
@@ -131,12 +155,12 @@ export class Retargeter {
         delete this.smooth[side];
         continue;
       }
-      out[side] = this.retargetHand(hand, now, !!hands.positionsRelative);
+      out[side] = this.retargetHand(hand, now, !!hands.positionsRelative, !!hands.framesOpenXR);
     }
     return out;
   }
 
-  private retargetHand(hand: HumanHand, now: number, positionsRelative: boolean): RobotHandCommand {
+  private retargetHand(hand: HumanHand, now: number, positionsRelative: boolean, openxr = false): RobotHandCommand {
     const cal = this.calibration[hand.side];
     if (!cal.neutral && this.calibration.autoNeutral) cal.neutral = fromQ(hand.wristRotation);
     const raw = measure(hand, cal);
@@ -168,10 +192,27 @@ export class Retargeter {
     ).clampScalar(-1.6, 1.6);
 
     const neutral = cal.neutral ? toQ(cal.neutral) : new Quaternion();
-    const delta = hand.wristRotation.clone().multiply(neutral.invert());
-    const rot = rotationToThree(delta, this.calibration.mirrorX);
+    let rot: Quaternion;
+    if (openxr) {
+      // The SDK's wrist frame is the robot hand's own frame and its world is
+      // gravity-aligned, so the robot copies the true orientation. Only the
+      // heading (magnetic north) is arbitrary: zero it to the direction the
+      // fingers pointed in the neutral pose, so "forward" is towards the screen.
+      const n = rotationToThree(neutral, false);
+      const unturn = new Quaternion().setFromAxisAngle(UP, -headingOf(n));
+      rot = unturn.clone().multiply(rotationToThree(hand.wristRotation, false));
+      if (positionsRelative) {
+        // Aim where the fingers point: turn right to aim right, tip up to aim up
+        // (pitch measured from the neutral pose, so a relaxed hand aims at the middle).
+        const p = FORWARD.clone().applyQuaternion(rot);
+        const p0 = FORWARD.clone().applyQuaternion(unturn.multiply(n));
+        const yaw = Math.atan2(p.x, -p.z);
+        const pitch = Math.asin(Math.max(-1, Math.min(1, p.y))) - Math.asin(Math.max(-1, Math.min(1, p0.y)));
+        pos.set(Math.sin(yaw) * AIM_GAIN, Math.sin(pitch) * AIM_GAIN, 0).clampScalar(-1.6, 1.6);
+      }
+    } else rot = rotationToThree(hand.wristRotation.clone().multiply(neutral.invert()), this.calibration.mirrorX);
 
-    if (positionsRelative) {
+    if (positionsRelative && !openxr) {
       // No world position: aim like a pointer instead. Where the fingers point (relative to
       // neutral) moves the robot's wrist, so tilting/turning the hand steers the knife.
       const pointing = new Vector3(0, 0, -1).applyQuaternion(rot);
@@ -192,7 +233,7 @@ export class Retargeter {
       st.t = now;
     }
     const grip = (st.dof[2] + st.dof[3] + st.dof[4] + st.dof[5]) / 4;
-    return { side: hand.side, dof: [...st.dof] as Dof6, raw, position: st.position.clone(), rotation: st.rotation.clone(), grip };
+    return { side: hand.side, dof: [...st.dof] as Dof6, raw, position: st.position.clone(), rotation: st.rotation.clone(), grip, absolute: openxr, shape: handShape(hand) };
   }
 }
 

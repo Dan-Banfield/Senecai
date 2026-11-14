@@ -5,6 +5,7 @@ import { BenchPage } from './pages/BenchPage';
 import { CommunityPage } from './pages/CommunityPage';
 import { CreationPage } from './pages/CreationPage';
 import { KantelePage } from './pages/KantelePage';
+import { PianoPage } from './pages/PianoPage';
 import { InputPanel, SourcePill } from './ui/InputPanel';
 import { SearchBar } from './ui/SearchBar';
 
@@ -46,6 +47,7 @@ function Shell() {
           <Routes>
             <Route path="/" element={<GlobePage />} />
             <Route path="/kantele" element={<KantelePage />} />
+            <Route path="/piano" element={<PianoPage />} />
             <Route path="/craft/:id" element={<BenchPage />} />
             <Route path="/community" element={<CommunityPage />} />
             <Route path="/community/:id" element={<CreationPage />} />

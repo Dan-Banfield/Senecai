@@ -12,7 +12,7 @@ import * as THREE from 'three';
 import { create } from 'zustand';
 import { primaryCommand, secondaryCommand, usePipeline } from '../input/pipeline';
 import type { RobotPose } from '../robot/RobotHand';
-import type { Dof6, RobotHandCommand } from '../robot/retarget';
+import type { RobotHandCommand } from '../robot/retarget';
 import type { Side } from '../rokoko/types';
 import { Bench, biteOf, r3, type Aim, type CraftBench, type InteractCtx, type Meter, type Op, type ToolDef } from './core';
 import { carvingRotation, GRIP, HAND_SCALE, handRotation, tipForWrist, wristForHover, wristForSteady, wristForTool } from './pose';
@@ -70,6 +70,8 @@ export const useBenchUi = create<BenchUi>(() => ({
 const CARVING_TOOLS = new Set(['knife']);
 /** Smallest yaw / roll change (radians) worth an op while turning. */
 const TURN_STEP = 0.01;
+/** Inputs that know where each hand is in space (so both robot hands can follow them around). */
+const TRACKED_KINDS = new Set<string>(['webcam', 'fused']);
 
 export interface HandView {
   side: Side;
@@ -497,10 +499,10 @@ export class BenchSession {
     const d = off.position.clone().sub(a.p);
     const c = THREE.MathUtils.clamp;
     const fist = new THREE.Vector3(...hd.at).add(new THREE.Vector3(c(d.x * 0.55, -1.1, 1.1), c(d.y * 0.5, -0.8, 1.0), c(d.z * 0.45, -0.8, 0.8)));
-    const rotation = off.rotation.clone().multiply(a.q.clone().invert()).multiply(handRotation(side));
+    // The piece turns with the hand: as the glove turns it, or relative to how the hand was when it took hold.
+    const rotation = off.absolute ? off.rotation.clone() : off.rotation.clone().multiply(a.q.clone().invert()).multiply(handRotation(side));
     const position = fist.sub(GRIP.clone().multiplyScalar(HAND_SCALE).applyQuaternion(rotation));
-    const dof = off.dof.map((v, i) => (i < 2 ? Math.max(0.55, v) : Math.max(0.82, v))) as Dof6;
-    return { dof, position, rotation };
+    return { dof: off.dof, position, rotation, shape: off.shape };
   }
 
   private ctx(side: Side, aim: Aim, cmd: RobotHandCommand | undefined, dt: number, pressed = false, released = false): InteractCtx {
@@ -621,11 +623,20 @@ export class BenchSession {
           }
           this.lastOffX = off.position.x;
         } else this.lastOffX = null;
-        const wp = this.def.turnTarget?.(this.bench) ?? [...this.bench.workpieces.keys()][0];
-        const target = new THREE.Vector3();
-        if (!wp || !this.wpTransform(wp, target, new THREE.Quaternion())) target.set(0, 0.8, 0);
-        const w = wristForSteady(target.add(new THREE.Vector3(0, 0.6, 0)), offSide, new THREE.Vector3(off.position.x * 0.3, off.position.y * 0.25, 0));
-        this.hands[offSide].pose = { dof: off.dof, position: w.position, rotation: w.rotation };
+        if (TRACKED_KINDS.has(usePipeline.getState().kind ?? '')) {
+          // The camera knows where this hand is: put the robot hand there, like the working hand.
+          const at = this.computeAim(off, camera).point;
+          const extra = off.absolute ? off.rotation.clone().multiply(handRotation(offSide).invert()) : new THREE.Quaternion().slerp(off.rotation, 0.2);
+          const w = wristForHover(at, offSide, closed ? 1 : 0, extra);
+          this.hands[offSide].pose = { dof: off.dof, position: w.position, rotation: w.rotation, shape: off.shape };
+        } else {
+          // No real position: steady the work from beside it.
+          const wp = this.def.turnTarget?.(this.bench) ?? [...this.bench.workpieces.keys()][0];
+          const target = new THREE.Vector3();
+          if (!wp || !this.wpTransform(wp, target, new THREE.Quaternion())) target.set(0, 0.8, 0);
+          const w = wristForSteady(target.add(new THREE.Vector3(0, 0.6, 0)), offSide, new THREE.Vector3(off.position.x * 0.3, off.position.y * 0.25, 0));
+          this.hands[offSide].pose = { dof: off.dof, position: w.position, rotation: off.absolute ? off.rotation.clone() : w.rotation, shape: off.shape };
+        }
       }
       this.offClosed = closed;
     } else if (held) {
@@ -686,7 +697,9 @@ export class BenchSession {
 
   private posePrimary(side: Side, cmd: RobotHandCommand, aim: Aim, dt: number): RobotPose {
     const tool = this.toolOf(side);
-    const extra = new THREE.Quaternion().slerp(cmd.rotation, 0.2);
+    // Gloves report the hand's true orientation: the robot hand copies it exactly.
+    // Other sources only hint at a turn of the wrist, so we show a little of it.
+    const extra = cmd.absolute ? cmd.rotation.clone().multiply(handRotation(side).invert()) : new THREE.Quaternion().slerp(cmd.rotation, 0.2);
     const k = 1 - Math.exp(-dt * 22);
     if (tool) {
       const onWork = aim.hit.type !== 'table';
@@ -700,7 +713,7 @@ export class BenchSession {
       const tip = (this.smoothTip[side] ??= target.clone()).lerp(target, k);
       this.tips[side].copy(tip);
       let ex = extra;
-      if (this.carveMix[side] > 0.001) {
+      if (this.carveMix[side] > 0.001 && !cmd.absolute) {
         // Blend from the usual pose to the carving pose, keeping a little of the hand's own twist.
         const base = handRotation(side, extra);
         const carve = carvingRotation(side, tool).multiply(new THREE.Quaternion().slerp(cmd.rotation, 0.12));
@@ -708,14 +721,13 @@ export class BenchSession {
         ex = blend.multiply(handRotation(side).invert());
       }
       const w = wristForTool(tip, side, tool, ex);
-      const hold = cmd.dof.map((v, i) => (i < 2 ? Math.max(0.5, v) : 0.62 + 0.38 * v)) as Dof6;
-      return { dof: hold, position: w.position, rotation: w.rotation };
+      return { dof: cmd.dof, position: w.position, rotation: w.rotation, shape: cmd.shape };
     }
     const target = aim.point.clone();
     const tip = (this.smoothTip[side] ??= target.clone()).lerp(target, k);
     this.tips[side].copy(tip);
     const w = wristForHover(tip, side, this.squeezing ? 1 : 0, extra);
-    return { dof: cmd.dof, position: w.position, rotation: w.rotation };
+    return { dof: cmd.dof, position: w.position, rotation: w.rotation, shape: cmd.shape };
   }
 
   private describe(aim: Aim, side: Side): string | null {

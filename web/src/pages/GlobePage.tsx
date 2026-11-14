@@ -249,7 +249,6 @@ export default function GlobePage() {
   const [creations, setCreations] = useState<Creation[]>([]);
   const [hover, setHover] = useState<Pin | null>(null);
   const [selected, setSelected] = useState<CountryFeature | null>(null);
-  const [aboutOpen, setAboutOpen] = useState(false);
   const [clustered, setClustered] = useState(true);
   const clusteredRef = useRef(true);
   const creationCountry = useMemo(
@@ -329,7 +328,6 @@ export default function GlobePage() {
     clearTimeout(hideTimer.current);
     hoverRef.current = null;
     setHover(null);
-    setAboutOpen(false);
     if (selectedRef.current) selectCountry(null);
   };
   const dismissRef = useRef(dismiss);

@@ -39,7 +39,7 @@ export interface ActorFrame {
    * Senecai extension, added by our bridge for Rokoko Device SDK frames (Studio never sends it).
    * "wrist-relative": hand positions carry no world position (no Coil Pro).
    */
-  senecai?: { positions?: string };
+  senecai?: { positions?: string; frames?: string };
 }
 
 export interface RokokoFrame {

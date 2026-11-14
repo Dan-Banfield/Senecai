@@ -11,6 +11,7 @@ import { persist } from 'zustand/middleware';
 import { parseFrame, type HumanHands } from '../rokoko/parse';
 import type { RokokoFrame, Side } from '../rokoko/types';
 import { captureFist, captureOpen, defaultCalibration, Retargeter, toInspireAngles, type Calibration, type RobotHandCommand } from '../robot/retarget';
+import { FusedSource } from './fusedSource';
 import { DEFAULT_BRIDGE_URL, GlovesSource } from './glovesSource';
 import { KeyboardSource } from './keyboardSource';
 import type { HandSource, SourceKind, SourceStatus } from './types';
@@ -42,7 +43,16 @@ interface PipelineStore {
   fps: number;
   present: { left: boolean; right: boolean };
   settings: Settings;
-  calibrations: Partial<Record<SourceKind, Calibration>>;
+  /** Saved calibrations, by input (and context: "gloves:piano" is the gloves calibrated for the piano). */
+  calibrations: Record<string, Calibration>;
+  /**
+   * What the calibration is for. A page can ask for its own (the piano wants your
+   * playing position as the rest pose); everything else uses "default".
+   */
+  calibrationContext: string;
+  setCalibrationContext(context: string): void;
+  /** The last calibration step taken (pages that need to know your rest pose listen for it). */
+  calibratedAt: { step: 'open' | 'fist'; context: string; at: number } | null;
   /** Last source the user picked, restarted automatically on reload. */
   lastKind: SourceKind | null;
   panelOpen: boolean;
@@ -54,15 +64,19 @@ interface PipelineStore {
   resetCalibration(): void;
 }
 
+/** Where a calibration is saved: per input, and per context other than the default. */
+export const calibrationKey = (kind: SourceKind, context: string) => (context === 'default' ? kind : `${kind}:${context}`);
+
 const retargeter = new Retargeter(defaultCalibration());
 
 function calibrationFor(kind: SourceKind, stored?: Calibration): Calibration {
   const cal = stored ? structuredClone(stored) : defaultCalibration();
-  if (!stored && kind === 'webcam') {
+  // Hand positions come from the webcam for both of these.
+  if (!stored && (kind === 'webcam' || kind === 'fused')) {
     cal.positionScale = 0.2;
   }
   // Glove yaw has an arbitrary zero (magnetic north), so start from wherever the hand is.
-  if (kind === 'gloves') cal.autoNeutral = true;
+  if (kind === 'gloves' || kind === 'fused') cal.autoNeutral = true;
   return cal;
 }
 
@@ -75,20 +89,35 @@ export const usePipeline = create<PipelineStore>()(
       present: { left: false, right: false },
       settings: { dominant: 'right', swapHands: false, bridgeUrl: DEFAULT_BRIDGE_URL, mirrorRobot: false },
       calibrations: {},
+      calibrationContext: 'default',
+      calibratedAt: null,
       lastKind: null,
       panelOpen: false,
       setPanelOpen: (panelOpen) => set({ panelOpen }),
+      setCalibrationContext(context) {
+        if (context === get().calibrationContext) return;
+        set({ calibrationContext: context });
+        const kind = get().kind;
+        if (kind) retargeter.calibration = calibrationFor(kind, get().calibrations[calibrationKey(kind, context)]);
+      },
 
       async start(kind) {
         get().stop();
-        const { settings, calibrations } = get();
-        retargeter.calibration = calibrationFor(kind, calibrations[kind]);
-        // The webcam is noisier than the gloves, so smooth it more.
+        const { settings, calibrations, calibrationContext } = get();
+        retargeter.calibration = calibrationFor(kind, calibrations[calibrationKey(kind, calibrationContext)]);
+        // The webcam is noisier than the gloves, so smooth what it measures more:
+        // everything for the webcam alone, just positions with the gloves.
         retargeter.dofTau = kind === 'webcam' ? 0.07 : 0.03;
-        retargeter.posTau = kind === 'webcam' ? 0.09 : 0.04;
+        retargeter.posTau = kind === 'webcam' || kind === 'fused' ? 0.09 : 0.04;
 
         const source: HandSource =
-          kind === 'webcam' ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands }) : kind === 'gloves' ? new GlovesSource(settings.bridgeUrl) : new KeyboardSource();
+          kind === 'webcam'
+            ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands })
+            : kind === 'gloves'
+              ? new GlovesSource(settings.bridgeUrl)
+              : kind === 'fused'
+                ? new FusedSource(settings.bridgeUrl, settings.swapHands)
+                : new KeyboardSource();
         live.source = source;
         set({ kind, lastKind: kind, status: { state: 'starting', message: 'Starting…' } });
         try {
@@ -112,7 +141,9 @@ export const usePipeline = create<PipelineStore>()(
       updateSettings(s) {
         set({ settings: { ...get().settings, ...s } });
         if (live.source instanceof WebcamSource && s.swapHands !== undefined) live.source.swapHands = s.swapHands;
-        if (s.bridgeUrl !== undefined && get().kind === 'gloves') void get().start('gloves');
+        if (live.source instanceof FusedSource && s.swapHands !== undefined) live.source.webcam.swapHands = s.swapHands;
+        const kind = get().kind;
+        if (s.bridgeUrl !== undefined && (kind === 'gloves' || kind === 'fused')) void get().start(kind);
       },
 
       calibrate(step) {
@@ -126,7 +157,10 @@ export const usePipeline = create<PipelineStore>()(
         // Apply the same calibration to the other hand if it is visible.
         const other = side === 'left' ? live.hands.right : live.hands.left;
         if (other) step === 'open' ? captureOpen(retargeter.calibration, other) : captureFist(retargeter.calibration, other);
-        set({ calibrations: { ...get().calibrations, [kind]: structuredClone(retargeter.calibration) } });
+        set({
+          calibrations: { ...get().calibrations, [calibrationKey(kind, get().calibrationContext)]: structuredClone(retargeter.calibration) },
+          calibratedAt: { step, context: get().calibrationContext, at: performance.now() },
+        });
         return side;
       },
 
@@ -134,7 +168,7 @@ export const usePipeline = create<PipelineStore>()(
         const kind = get().kind;
         if (!kind) return;
         const calibrations = { ...get().calibrations };
-        delete calibrations[kind];
+        delete calibrations[calibrationKey(kind, get().calibrationContext)];
         retargeter.calibration = calibrationFor(kind);
         set({ calibrations });
       },
@@ -153,6 +187,9 @@ function onFrame(frame: RokokoFrame) {
   live.frameCount++;
   live.lastFrameAt = performance.now();
 }
+
+/** Metres of real hand travel per unit of RobotHandCommand.position, for the current input. */
+export const positionScale = () => retargeter.calibration.positionScale;
 
 /** The hand that drives the craft: the dominant hand if visible, else whichever is. */
 export function primaryCommand(): RobotHandCommand | undefined {

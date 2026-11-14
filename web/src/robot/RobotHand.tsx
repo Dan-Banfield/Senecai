@@ -1,6 +1,7 @@
-// Procedural 6-DoF robot hand modelled on the Inspire RH56 layout: four
-// two-link fingers (links coupled), and a thumb with a rotation joint and a
-// coupled two-link bend.
+// Procedural robot hand modelled on the Inspire RH56 layout: four fingers and
+// a thumb. Shown one to one with your hand when the pose carries its shape
+// (every finger bone as measured; see handShape.ts); otherwise driven by the 6
+// actuator values, with each finger's three links coupled.
 //
 // Canonical pose: palm facing down (-Y), fingers pointing away from the viewer
 // (-Z), right-hand thumb on the -X side. A left hand is the mirror image.
@@ -9,6 +10,7 @@ import { useFrame } from '@react-three/fiber';
 import { useMemo, useRef, type ReactNode } from 'react';
 import * as THREE from 'three';
 import type { Side } from '../rokoko/types';
+import type { HandShape } from './handShape';
 import type { Dof6 } from './retarget';
 
 export interface RobotPose {
@@ -16,6 +18,8 @@ export interface RobotPose {
   /** World position of the wrist. */
   position: THREE.Vector3;
   rotation: THREE.Quaternion;
+  /** The human hand's exact finger shape: when present, the fingers show it as is. */
+  shape?: HandShape;
 }
 
 interface Props {
@@ -31,13 +35,32 @@ interface Props {
   scale?: number;
 }
 
-const FINGER_X = [-0.3, -0.1, 0.1, 0.3];
-const FINGER_LEN: [number, number][] = [
+export const FINGER_X = [-0.3, -0.1, 0.1, 0.3];
+/**
+ * Knuckle positions (index..little). Like a human hand they form an arch: the
+ * middle knuckle furthest forward, the little finger's lower and further back,
+ * so the same joint angles put the robot's fingertips where a hand's would be.
+ */
+export const FINGER_BASE: [number, number, number][] = [
+  [-0.3, 0, -0.53],
+  [-0.1, 0.005, -0.55],
+  [0.1, -0.012, -0.52],
+  [0.3, -0.05, -0.46],
+];
+export const FINGER_LEN: [number, number][] = [
   [0.42, 0.34],
   [0.46, 0.36],
   [0.43, 0.34],
   [0.36, 0.28],
 ];
+/** A finger's three links: proximal, middle and distal (the last two share the old distal length). */
+export const fingerLinks = (i: number): [number, number, number] => [FINGER_LEN[i][0], FINGER_LEN[i][1] * 0.58, FINGER_LEN[i][1] * 0.42];
+/** With only actuator values, how much each link bends per unit of curl. */
+export const CURL_GAIN: [number, number, number] = [1.45, 1.1, 0.8];
+/** Thumb: mounted under the palm's index side, angled forwards like a human thumb. */
+export const THUMB_BASE: [number, number, number] = [-0.38, -0.06, -0.25];
+export const THUMB_YAW = 0.5;
+export const THUMB_LEN: [number, number] = [0.42, 0.34];
 
 function useMaterials(ghost: boolean) {
   return useMemo(() => {
@@ -80,6 +103,8 @@ export function RobotHand({ side, getPose, ghost = false, anchor, tipsRef, child
   const thumbRot = useRef<THREE.Group>(null);
   const thumb1 = useRef<THREE.Group>(null);
   const thumb2 = useRef<THREE.Group>(null);
+  const thumbYaw = useRef<THREE.Group>(null);
+  const mid = useRef<(THREE.Group | null)[]>([]);
   const tips = useRef<(THREE.Object3D | null)[]>([]);
   const arm = useRef<THREE.Mesh>(null);
   const armTop = useMemo(() => new THREE.Vector3(), []);
@@ -94,14 +119,23 @@ export function RobotHand({ side, getPose, ghost = false, anchor, tipsRef, child
     g.position.copy(pose.position);
     g.quaternion.copy(pose.rotation);
     const d = pose.dof;
+    const s = pose.shape;
     for (let i = 0; i < 4; i++) {
-      const c = d[i + 2];
-      prox.current[i]?.rotation.set(-c * 1.45, 0, 0);
-      dist.current[i]?.rotation.set(-c * 1.25, 0, 0);
+      const links = [prox.current[i], mid.current[i], dist.current[i]];
+      if (s) links.forEach((l, k) => l?.quaternion.copy(s.fingers[i][k]));
+      else links.forEach((l, k) => l?.rotation.set(-d[i + 2] * CURL_GAIN[k], 0, 0));
     }
-    if (thumbRot.current) thumbRot.current.rotation.z = d[0] * 1.15;
-    if (thumb1.current) thumb1.current.rotation.x = -d[1] * 1.0;
-    if (thumb2.current) thumb2.current.rotation.x = -d[1] * 1.4;
+    if (s) {
+      thumbRot.current?.quaternion.copy(s.thumb[0]);
+      thumbYaw.current?.rotation.set(0, 0, 0);
+      thumb1.current?.rotation.set(0, 0, 0);
+      thumb2.current?.quaternion.copy(s.thumb[1]);
+    } else {
+      thumbRot.current?.rotation.set(0, 0, d[0] * 1.15);
+      thumbYaw.current?.rotation.set(0, THUMB_YAW, 0);
+      thumb1.current?.rotation.set(-d[1] * 1.0, 0, 0);
+      thumb2.current?.rotation.set(-d[1] * 1.4, 0, 0);
+    }
     if (tipsRef) tipsRef.current = tips.current.filter(Boolean) as THREE.Object3D[];
 
     if (anchor && arm.current) {
@@ -136,41 +170,49 @@ export function RobotHand({ side, getPose, ghost = false, anchor, tipsRef, child
           <boxGeometry args={[0.5, 0.02, 0.6]} />
         </mesh>
         {/* Fingers */}
-        {FINGER_X.map((x, i) => (
-          <group key={i} position={[x, 0, -0.53]}>
+        {FINGER_BASE.map((base, i) => (
+          <group key={i} position={base}>
             <mesh material={m.joint} rotation={[0, 0, Math.PI / 2]}>
               <cylinderGeometry args={[0.07, 0.07, 0.17, 16]} />
             </mesh>
             <group ref={(el) => void (prox.current[i] = el)}>
               <Link length={FINGER_LEN[i][0]} width={0.15} mat={m.shell} padMat={m.pad} />
-              <group position={[0, 0, -FINGER_LEN[i][0]]}>
+              <group position={[0, 0, -fingerLinks(i)[0]]}>
                 <mesh material={m.joint} rotation={[0, 0, Math.PI / 2]}>
                   <cylinderGeometry args={[0.062, 0.062, 0.15, 16]} />
                 </mesh>
-                <group ref={(el) => void (dist.current[i] = el)}>
-                  <Link length={FINGER_LEN[i][1]} width={0.13} mat={m.shell} padMat={m.pad} tip />
-                  <object3D ref={(el) => void (tips.current[i + 1] = el)} position={[0, -0.05, -FINGER_LEN[i][1]]} />
+                <group ref={(el) => void (mid.current[i] = el)}>
+                  <Link length={fingerLinks(i)[1]} width={0.14} mat={m.shell} padMat={m.pad} />
+                  <group position={[0, 0, -fingerLinks(i)[1]]}>
+                    <mesh material={m.joint} rotation={[0, 0, Math.PI / 2]}>
+                      <cylinderGeometry args={[0.058, 0.058, 0.14, 16]} />
+                    </mesh>
+                    <group ref={(el) => void (dist.current[i] = el)}>
+                      <Link length={fingerLinks(i)[2]} width={0.13} mat={m.shell} padMat={m.pad} tip />
+                      <object3D ref={(el) => void (tips.current[i + 1] = el)} position={[0, -0.05, -fingerLinks(i)[2]]} />
+                    </group>
+                  </group>
                 </group>
               </group>
             </group>
           </group>
         ))}
         {/* Thumb: rotate about the palm's long axis, then bend */}
-        <group position={[-0.42, -0.06, 0.12]}>
+        <group position={THUMB_BASE}>
           <group ref={thumbRot}>
             <mesh material={m.joint}>
               <sphereGeometry args={[0.1, 16, 12]} />
             </mesh>
-            <group rotation={[0, 1.15, 0]}>
+            <group ref={thumbYaw} rotation={[0, THUMB_YAW, 0]}>
               <group ref={thumb1}>
-                <Link length={0.36} width={0.16} mat={m.shell} padMat={m.pad} />
-                <group position={[0, 0, -0.36]}>
+                <Link length={THUMB_LEN[0]} width={0.16} mat={m.shell} padMat={m.pad} />
+                <group position={[0, 0, -THUMB_LEN[0]]}>
                   <mesh material={m.joint} rotation={[0, 0, Math.PI / 2]}>
                     <cylinderGeometry args={[0.068, 0.068, 0.16, 16]} />
                   </mesh>
                   <group ref={thumb2}>
-                    <Link length={0.3} width={0.14} mat={m.shell} padMat={m.pad} tip />
-                    <object3D ref={(el) => void (tips.current[0] = el)} position={[0, -0.05, -0.3]} />
+                    <Link length={THUMB_LEN[1]} width={0.14} mat={m.shell} padMat={m.pad} tip />
+                    <object3D ref={(el) => void (tips.current[0] = el)} position={[0, -0.05, -THUMB_LEN[1]]} />
                   </group>
                 </group>
               </group>

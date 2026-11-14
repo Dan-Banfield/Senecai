@@ -5,6 +5,7 @@
 Junction 2026 · Rokoko track: *"Use professional motion capture to control robotic hands… useful, unexpected, or downright unbelievable."*
 
 - **The globe** (home page): a globe drawn like an old printed atlas on parchment: pastel countries (neighbours in different colours, craft countries in green), a mottled sea with a latitude/longitude grid, and serif lettering for countries, oceans and capitals that fills in as you zoom. Drag to spin, click a country to land, click outside it or press Esc to zoom back out, or use the search bar to find a country, region or craft. Pins mark where each craft comes from, and hover cards show a photo, the story, and what the craft would teach a robot. When zoomed out, crowded countries collapse into one cluster; clicking it lands there.
+- **Piano** (Florence, where Bartolomeo Cristofori built the first one around 1700): both robot hands at a two-and-a-half-octave keyboard, learning *Mary Had a Little Lamb* (the next key glows; "Listen first" plays it). Notes come from collisions, not finger angles: each robot fingertip's real position is computed from the hand's joints, a key goes down only as far as a fingertip pushes it, sounds near the bottom of its travel, and stops the finger (the hand rides up) when it bottoms out. Calibrating on this page uses your piano position as the rest pose: hands resting as if on the keys put the robot's right thumb on middle C.
 - **Kantele** (Finland's five-string national instrument): one finger per string, which maps directly onto a five-finger robot hand. Guided lessons with a ghost hand, a rhythm-game timing mode, and free play with recording.
 - **Puukko workbench** (the Finnish belt knife): a virtual smithy and carving table. Close your hand over a tool to pick it up and squeeze to use it. Heat the bar in the forge, hammer the blade out on the anvil, quench it, sharpen it, then carve the birch handle and fit the blade. For the handle, your other hand picks up the blank with a fist and holds it; it follows that hand in 3D and turns as your wrist turns. The knife takes a shaving wherever you draw it across the wood, and how hard you squeeze sets the depth, from a thin curl to a deep bite. The wood is a density field drawn as a smooth surface with real grain, so cuts thinner than a voxel show.
 - **Recordings remember everything**: both robot hands, the tool each one holds, and every change made to the workpiece, frame by frame. Replays rebuild the object's mesh exactly as it was made, and you can scrub through them.
@@ -22,6 +23,7 @@ Open the app, click **Choose input** (top right), then pick one:
 |---|---|
 | 📷 Webcam (glove emulator) | MediaPipe hand tracking converted into **Rokoko JSON v3 frames**. Hold your hand up with the palm facing the camera. |
 | 🧤 Rokoko Smartgloves | Real gloves: Rokoko Studio → bridge → browser. |
+| 🙌 Gloves + webcam | The gloves drive fingers and wrist rotation; the webcam tracks where each hand is. Best with Smartgloves (no Coil Pro needed). |
 | ⌨️ Keyboard + mouse | Right hand: `A S D F G` curl thumb…little, `Space` = fist, `H` = thumb across palm, mouse moves the hand. Left hand: `Z` closes/opens its fist, arrow keys turn its wrist. |
 
 Calibrate (open hand, then fist; about 6 seconds) from the same panel. It makes a big difference.
@@ -100,6 +102,8 @@ web/src/rokoko/         JSON v3 types, parser, FK frame builder
 web/src/input/          webcam / gloves / keyboard sources, live pipeline + calibration (zustand)
 web/src/robot/          retargeting, Inspire export, procedural 3D robot hand
 web/src/crafts/kantele/ music, lessons, pluck detection, Karplus-Strong audio, session, 3D stage
+web/src/crafts/piano/   keyboard layout and song, fingertip/key collision, piano synth, session, 3D stage
+web/src/robot/fingertips.ts  robot fingertip positions from a pose (same joint chain RobotHand draws)
 web/src/bench/          craft workbench: core (ops, bench state), session (input → tools → ops, holding work in
                         the off hand, recording, replay), materials/ (voxel wood with knife shaving, surface-nets
                         mesher, forged bar), crafts/ (the puukko, plus shared moves in kit.ts),
@@ -141,6 +145,7 @@ Craft photos are from Wikimedia Commons, resized to 640px; each card shows its c
 | Photo | Author | Licence | Source |
 |---|---|---|---|
 | kantele | TheYellowFellow | CC0 | [Commons](https://commons.wikimedia.org/wiki/File:Five_string_kanteles.jpg) |
+| piano | The Metropolitan Museum of Art | CC0 | [Commons](https://commons.wikimedia.org/wiki/File:Grand_Piano_MET_DP300910.jpg) |
 | puukko | Kuroczynski | CC BY-SA 4.0 | [Commons](https://commons.wikimedia.org/wiki/File:%E2%80%9EIMG_5221_Puukko_and_fish_filleting_knife_with_sheath_by_J._Marttiini_(cropped).jpg) |
 
 Country outlines come from [world-atlas](https://github.com/topojson/world-atlas) (Natural Earth). The globe uses [globe.gl](https://globe.gl).

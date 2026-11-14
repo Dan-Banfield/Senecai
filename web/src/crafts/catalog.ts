@@ -1,6 +1,7 @@
 // Every craft on the globe, pinned to the region it comes from, and what each
-// one teaches a robot hand: the kantele (fine finger control and timing) and the
-// puukko (tool use, heat and force control).
+// one teaches a robot hand: the kantele (fine finger control and timing), the
+// puukko (tool use, heat and force control) and the piano (finger independence
+// and touch).
 //
 // Photos come from Wikimedia Commons, resized, with credits shown in the cards.
 
@@ -60,6 +61,27 @@ export const CRAFTS: CraftInfo[] = [
     status: 'playable',
     route: '/craft/puukko',
     image: { src: '/crafts/puukko.jpg', alt: 'A puukko knife and a filleting knife with a leather sheath', author: 'Kuroczynski', license: 'CC BY-SA 4.0', source: commons('%E2%80%9EIMG_5221_Puukko_and_fish_filleting_knife_with_sheath_by_J._Marttiini_(cropped).jpg') },
+  },
+  {
+    id: 'piano',
+    name: 'Piano',
+    localName: 'pianoforte',
+    country: 'Italy',
+    region: 'Florence, Tuscany, Italy',
+    lat: 43.77,
+    lng: 11.25,
+    blurb:
+      "Around 1700, Bartolomeo Cristofori, keeper of instruments to the Medici, built a harpsichord whose strings were struck by hammers, so it could play soft and loud: the gravicembalo col piano e forte. Every piano since descends from it.",
+    robotSkills: ['finger independence', 'touch', 'timing'],
+    status: 'playable',
+    route: '/piano',
+    image: {
+      src: '/crafts/piano.jpg',
+      alt: "The keyboard of Bartolomeo Cristofori's 1720 piano",
+      author: 'The Metropolitan Museum of Art',
+      license: 'CC0',
+      source: commons('Grand_Piano_MET_DP300910.jpg'),
+    },
   },
 ];
 

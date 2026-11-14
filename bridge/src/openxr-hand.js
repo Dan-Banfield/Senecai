@@ -104,8 +104,11 @@ export function buildStudioFrame(hands, timestamp) {
           meta: { hasGloves: has.left || has.right, hasLeftGlove: has.left, hasRightGlove: has.right, hasBody: false, hasFace: false },
           dimensions: { totalHeight: 1.8, hipHeight: 0.95 },
           // Not part of Studio's format: tells the app that hand positions are
-          // wrist-relative (no Coil Pro), so it should aim from wrist orientation instead.
-          senecai: { positions: 'wrist-relative' },
+          // wrist-relative (no Coil Pro), so it should aim from wrist orientation instead,
+          // and that joint orientations use OpenXR's frame (fingers along -Z, back of the
+          // hand +Y), which is also the robot hand's rest pose, so the robot can copy
+          // the wrist's orientation directly.
+          senecai: { positions: 'wrist-relative', frames: 'openxr' },
           body,
         },
       ],

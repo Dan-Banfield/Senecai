@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
-import { usePipeline } from '../input/pipeline';
+import { calibrationKey, usePipeline } from '../input/pipeline';
 import { KEYBOARD_HELP } from '../input/keyboardSource';
 import { SOURCE_LABELS, type SourceKind } from '../input/types';
 
 const SOURCES: { kind: SourceKind; icon: string; desc: string }[] = [
   { kind: 'webcam', icon: '📷', desc: 'Emulates the gloves with webcam hand tracking. Same Rokoko JSON v3 frames, no hardware.' },
-  { kind: 'gloves', icon: '🧤', desc: 'Rokoko Device SDK (Linux, macOS, Windows) or Rokoko Studio → bridge (npm run bridge) → here.' },
+  { kind: 'fused', icon: '🧤📷', desc: 'Best with Smartgloves: the gloves drive your fingers and wrist, the webcam tracks where your hands are. Needs the bridge (npm run bridge:sdk) and a camera.' },
+  { kind: 'gloves', icon: '🧤', desc: 'Rokoko Device SDK (Linux, macOS, Windows) or Rokoko Studio → bridge (npm run bridge) → here. Without a Coil Pro the gloves can\'t track where your hands are, so you aim by tilting your wrist.' },
   { kind: 'keyboard', icon: '⌨️', desc: KEYBOARD_HELP },
 ];
 
@@ -21,8 +22,9 @@ export function SourcePill() {
   );
 }
 
-function CalibrationWizard({ onClose }: { onClose: () => void }) {
+export function CalibrationWizard({ onClose }: { onClose: () => void }) {
   const calibrate = usePipeline((s) => s.calibrate);
+  const piano = usePipeline((s) => s.calibrationContext === 'piano');
   const [step, setStep] = useState<'open' | 'fist' | 'done'>('open');
   const [count, setCount] = useState(3);
   const [error, setError] = useState('');
@@ -48,10 +50,29 @@ function CalibrationWizard({ onClose }: { onClose: () => void }) {
     <>
       <div className="modal-backdrop" onClick={onClose} />
       <div className="modal">
-        <h2>Calibrate your hand</h2>
-        {step === 'open' && <p>Hold your hand <b>open and relaxed</b>, in a comfortable spot in front of you. This sets "open", the neutral wrist angle, and the centre of your workspace.</p>}
-        {step === 'fist' && <p>Now make a <b>tight fist</b> with your thumb tucked across your fingers.</p>}
-        {step === 'done' && <p>Done. The robot hand now follows your range of motion. Recalibrate any time.</p>}
+        <h2>{piano ? 'Calibrate for the piano' : 'Calibrate your hand'}</h2>
+        {piano ? (
+          <>
+            {step === 'open' && (
+              <p>
+                Put both hands in <b>piano position</b> on a table in front of you: palms down, wrists level, fingers gently curved with the fingertips just touching the table, thumbs
+                resting beside them. This is where the robot's hands will sit on the keys: right thumb on middle C, left hand an octave lower.
+              </p>
+            )}
+            {step === 'fist' && (
+              <p>
+                Now <b>press down</b> with every finger and thumb, curling them as if playing a loud chord deep into the keys. Keep your hands where they are.
+              </p>
+            )}
+            {step === 'done' && <p>Done. Lift a finger and press it down to play a key; move your hands to reach other notes.</p>}
+          </>
+        ) : (
+          <>
+            {step === 'open' && <p>Hold your hand <b>open and relaxed</b>, in a comfortable spot in front of you. This sets "open", the neutral wrist angle, and the centre of your workspace.</p>}
+            {step === 'fist' && <p>Now make a <b>tight fist</b> with your thumb tucked across your fingers.</p>}
+            {step === 'done' && <p>Done. The robot hand now follows your range of motion. Recalibrate any time.</p>}
+          </>
+        )}
         {step !== 'done' ? <div className="calib-big">{count}</div> : <div className="calib-big">✓</div>}
         {error && <p style={{ color: 'var(--warn)' }}>{error}</p>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -65,7 +86,8 @@ function CalibrationWizard({ onClose }: { onClose: () => void }) {
 }
 
 export function InputPanel() {
-  const { panelOpen, setPanelOpen, kind, status, start, stop, settings, updateSettings, resetCalibration, calibrations, fps } = usePipeline();
+  const { panelOpen, setPanelOpen, kind, status, start, stop, settings, updateSettings, resetCalibration, calibrations, calibrationContext, fps } = usePipeline();
+  const calibrated = kind ? !!calibrations[calibrationKey(kind, calibrationContext)] : false;
   const [calibrating, setCalibrating] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState(settings.bridgeUrl);
   if (!panelOpen) return calibrating ? <CalibrationWizard onClose={() => setCalibrating(false)} /> : null;
@@ -101,7 +123,10 @@ export function InputPanel() {
         {kind && (
           <div className="card">
             <h3>Calibration</h3>
-            <p>{calibrations[kind] ? 'Calibrated for this input.' : 'Using defaults (auto-range is on). A 6-second calibration makes it feel much better.'}</p>
+            <p>
+              {calibrationContext === 'piano' ? 'For the piano: ' : ''}
+              {calibrated ? 'Calibrated for this input.' : 'Using defaults (auto-range is on). A 6-second calibration makes it feel much better.'}
+            </p>
             <div className="row" style={{ marginTop: 12 }}>
               <button
                 className="btn primary small"
@@ -112,7 +137,7 @@ export function InputPanel() {
               >
                 Calibrate
               </button>
-              {calibrations[kind] && (
+              {calibrated && (
                 <button className="btn small" onClick={resetCalibration}>
                   Reset
                 </button>

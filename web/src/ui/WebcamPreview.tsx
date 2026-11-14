@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from 'react';
 import { live, usePipeline } from '../input/pipeline';
+import { FusedSource } from '../input/fusedSource';
 import { WebcamSource } from '../input/webcamSource';
 
 const BONES = [
@@ -17,11 +18,11 @@ export function WebcamPreview() {
   const canvas = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
-    if (kind !== 'webcam') return;
+    if (kind !== 'webcam' && kind !== 'fused') return;
     let raf = 0;
     const draw = () => {
       raf = requestAnimationFrame(draw);
-      const src = live.source;
+      const src = live.source instanceof FusedSource ? live.source.webcam : live.source;
       const c = canvas.current;
       if (!(src instanceof WebcamSource) || !c) return;
       const ctx = c.getContext('2d')!;
@@ -59,7 +60,7 @@ export function WebcamPreview() {
     return () => cancelAnimationFrame(raf);
   }, [kind]);
 
-  if (kind !== 'webcam') return null;
+  if (kind !== 'webcam' && kind !== 'fused') return null;
   return (
     <div className="webcam">
       <canvas ref={canvas} />

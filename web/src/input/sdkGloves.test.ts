@@ -8,6 +8,7 @@ import { buildStudioFrame, synthOpenXrHand } from '../../../bridge/src/openxr-ha
 import { parseFrame } from '../rokoko/parse';
 import type { RokokoFrame } from '../rokoko/types';
 import { captureFist, captureOpen, defaultCalibration, Retargeter } from '../robot/retarget';
+import { placeHands } from './fusedSource';
 
 type Joint = { name: string; p: number[]; q: number[] };
 function sdkFrame(side: 'left' | 'right', curl: number, wristQ: number[] = [0, 0, 0, 1]): RokokoFrame {
@@ -55,5 +56,82 @@ describe('Rokoko Device SDK gloves', () => {
     const aim = r2.update(parseFrame(sdkFrame('right', 0, turned.toArray())), 10).right!;
     expect(Math.abs(aim.position.x)).toBeGreaterThan(0.5);
     expect(Math.abs(aim.position.y)).toBeLessThan(0.05);
+  });
+
+  describe('the robot hand copies the glove', () => {
+    // The solver's heading follows magnetic north, so the user can face any way.
+    const heading = new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), 2.5);
+    const at = (local: Quaternion) => heading.clone().multiply(local).toArray();
+    const command = (side: 'left' | 'right', local: Quaternion) => {
+      const cal = defaultCalibration();
+      captureOpen(cal, parseFrame(sdkFrame(side, 0, at(new Quaternion())))[side]!); // neutral: palm down, fingers at the screen
+      return new Retargeter(cal).update(parseFrame(sdkFrame(side, 0, at(local))), 0)[side]!;
+    };
+    const X = new Vector3(1, 0, 0);
+    const Y = new Vector3(0, 1, 0);
+    const Z = new Vector3(0, 0, 1);
+
+    for (const side of ['left', 'right'] as const) {
+      it(`${side}: holding the neutral pose shows the robot hand at rest, aiming at the middle`, () => {
+        const c = command(side, new Quaternion());
+        expect(c.absolute).toBe(true);
+        expect(c.rotation.angleTo(new Quaternion())).toBeLessThan(1e-3);
+        expect(c.position.length()).toBeLessThan(1e-3);
+      });
+
+      it(`${side}: tipping the fingers up aims up and tilts the robot hand up by the same angle`, () => {
+        const tilt = new Quaternion().setFromAxisAngle(X, 0.4);
+        const c = command(side, tilt);
+        expect(c.position.y).toBeGreaterThan(0.5);
+        expect(Math.abs(c.position.x)).toBeLessThan(0.02);
+        expect(c.rotation.angleTo(tilt)).toBeLessThan(1e-3);
+      });
+
+      it(`${side}: turning the hand to the right aims right and turns the robot hand right`, () => {
+        const turn = new Quaternion().setFromAxisAngle(Y, -0.4);
+        const c = command(side, turn);
+        expect(c.position.x).toBeGreaterThan(0.5);
+        expect(Math.abs(c.position.y)).toBeLessThan(0.02);
+        expect(c.rotation.angleTo(turn)).toBeLessThan(1e-3);
+      });
+
+      it(`${side}: rolling the wrist rolls the robot hand the same way, without moving the aim`, () => {
+        const roll = new Quaternion().setFromAxisAngle(Z, 0.6);
+        const c = command(side, roll);
+        expect(c.rotation.angleTo(roll)).toBeLessThan(1e-3);
+        expect(c.position.length()).toBeLessThan(0.02);
+      });
+    }
+  });
+
+  describe('with the webcam tracking where the hands are', () => {
+    const glove = (side: 'left' | 'right', local = new Quaternion()) => sdkFrame(side, 0.3, local.toArray());
+    it('moves each hand to where the camera sees it, leaving the glove data alone', () => {
+      const f = glove('right');
+      const placed = placeHands(f, { right: { p: { x: 0.12, y: 1.35, z: 0.42 } } })!;
+      const before = f.scene.actors[0].body!;
+      const after = placed.scene.actors[0].body!;
+      expect(after.rightHand!.position).toEqual({ x: 0.12, y: 1.35, z: 0.42 });
+      // Fingers keep their place relative to the wrist, and every rotation is the glove's.
+      const off = (b: typeof before, k: string) => b[k]!.position.x - b.rightHand!.position.x;
+      expect(off(after, 'rightIndexTip')).toBeCloseTo(off(before, 'rightIndexTip'), 9);
+      for (const k of Object.keys(before)) expect(after[k]!.rotation).toEqual(before[k]!.rotation);
+      const hands = parseFrame(placed);
+      expect(hands.positionsRelative).toBe(false);
+      expect(hands.framesOpenXR).toBe(true);
+    });
+
+    it('the robot hand moves with the camera position and turns with the glove', () => {
+      const cal = defaultCalibration();
+      cal.positionScale = 0.2;
+      const at = (x: number, turn: Quaternion) => parseFrame(placeHands(glove('right', turn), { right: { p: { x, y: 1.2, z: 0.3 } } })!);
+      captureOpen(cal, at(0, new Quaternion()).right!);
+      const turn = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), 0.5);
+      const c = new Retargeter(cal).update(at(0.1, turn), 0).right!;
+      expect(c.position.x).toBeCloseTo(0.5, 5); // 10 cm to the right
+      expect(c.position.y).toBeCloseTo(0, 5);
+      expect(c.absolute).toBe(true);
+      expect(c.rotation.angleTo(turn)).toBeLessThan(1e-3);
+    });
   });
 });

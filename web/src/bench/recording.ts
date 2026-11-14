@@ -4,6 +4,7 @@
 // memory, never stored) make seeking fast.
 
 import * as THREE from 'three';
+import { blendShape, packShape, unpackShape } from '../robot/handShape';
 import type { RobotPose } from '../robot/RobotHand';
 import type { Dof6 } from '../robot/retarget';
 import type { Side } from '../rokoko/types';
@@ -14,6 +15,8 @@ export interface BenchHand {
   dof: number[];
   p: number[];
   q: number[];
+  /** The hand's exact finger shape (packed quaternions), when the input measured one. */
+  s?: number[];
   /** Tool id held in this frame, or null. */
   tool: string | null;
 }
@@ -70,6 +73,7 @@ export class BenchRecorder {
         dof: pose.dof.map(r3),
         p: pose.position.toArray().map(r3),
         q: pose.rotation.toArray().map(r3),
+        ...(pose.shape ? { s: packShape(pose.shape, r3) } : {}),
         tool,
       })),
     };
@@ -109,12 +113,15 @@ export function sampleHand(rec: BenchRecording, time: number, side: Side): { pos
   const b = next?.hands.find((h) => h.side === side) ?? a;
   const span = next ? next.t - rec.frames[i].t : 0;
   const k = span > 0 ? Math.min(1, (time - rec.frames[i].t) / span) : 0;
+  const sa = a.s && unpackShape(a.s);
+  const sb = b.s && unpackShape(b.s);
   return {
     tool: a.tool,
     pose: {
       dof: a.dof.map((v, j) => v + (b.dof[j] - v) * k) as Dof6,
       position: new THREE.Vector3().fromArray(a.p).lerp(new THREE.Vector3().fromArray(b.p), k),
       rotation: new THREE.Quaternion().fromArray(a.q).slerp(new THREE.Quaternion().fromArray(b.q), k),
+      shape: sa && sb ? blendShape(sa, sb, k) : sa,
     },
   };
 }
