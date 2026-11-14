@@ -552,11 +552,6 @@ export default function GlobePage() {
 
       {!here && (
         <div className="globe-caption">
-          <p className="globe-lede">
-            Spin the world. Land somewhere.
-            <br />
-            <em>Learn its craft through robot hands.</em>
-          </p>
           <ul className="globe-legend">
             <li><span className="lg lg-playable" />playable craft</li>
             {CRAFTS.some((c) => c.status === 'soon') && <li><span className="lg lg-soon" />craft to come</li>}
