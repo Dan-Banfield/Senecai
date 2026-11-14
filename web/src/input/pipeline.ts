@@ -225,6 +225,19 @@ setInterval(() => {
   if (fps !== s.fps || present.left !== s.present.left || present.right !== s.present.right) usePipeline.setState({ fps, present });
 }, 500);
 
+/** Inspire 0..1000 angles per side to send to the robot instead of the live commands. */
+export type RobotOverride = () => Partial<Record<Side, number[]>> | undefined;
+let robotOverride: RobotOverride | null = null;
+
+/**
+ * While set, the robot link streams this (e.g. a replayed take) instead of
+ * `live.commands`. Pass null to go back to live input. Still gated by
+ * settings.mirrorRobot.
+ */
+export function setRobotOverride(fn: RobotOverride | null) {
+  robotOverride = fn;
+}
+
 // Optional: mirror retargeted commands to a physical robot hand via the bridge.
 // Reconnects with exponential backoff, and reopens when bridgeUrl changes.
 const ROBOT_BACKOFF_MIN = 500;
@@ -281,7 +294,13 @@ setInterval(() => {
     return;
   }
   if (robotWs.readyState !== WebSocket.OPEN) return;
+  const override = robotOverride?.();
   for (const side of ['left', 'right'] as Side[]) {
+    if (robotOverride) {
+      const inspire = override?.[side];
+      if (inspire) robotWs.send(JSON.stringify({ type: 'robot', side, inspire }));
+      continue;
+    }
     const c = live.commands[side];
     if (c) robotWs.send(JSON.stringify({ type: 'robot', side, inspire: toInspireAngles(c.dof) }));
   }

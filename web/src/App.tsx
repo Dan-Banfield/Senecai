@@ -6,6 +6,7 @@ import { SearchBar } from './ui/SearchBar';
 
 // The globe pulls in globe.gl and country data; only load it on the home page.
 const GlobePage = lazy(() => import('./pages/GlobePage'));
+const OcarinaPage = lazy(() => import('./pages/OcarinaPage'));
 
 function Brand() {
   return (
@@ -41,6 +42,7 @@ function Shell() {
           <Suspense fallback={<div className="globe-loading">Loading the world…</div>}>
           <Routes>
             <Route path="/" element={<GlobePage />} />
+            <Route path="/craft/ocarina" element={<OcarinaPage />} />
           </Routes>
           </Suspense>
         </main>

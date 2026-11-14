@@ -384,3 +384,26 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .app.home .globe-hint { color: rgba(78, 61, 43, 0.6); font-family: var(--display); font-style: italic; font-size: 14px; letter-spacing: 0.04em; bottom: 20px; }
 .app.home .globe-about-toggle { background: rgba(246, 238, 219, 0.9); border: 1px solid rgba(78, 61, 43, 0.55); border-radius: 3px; color: var(--birch); font-family: var(--display); font-size: 15px; font-variant: small-caps; right: 30px; bottom: 30px; }
 .app.home .globe-about { right: 30px; }
+
+/* ocarina */
+.oc-note { font-family: var(--display); font-size: 56px; line-height: 1.1; text-align: center; color: #9fd4a6; margin: 10px 0 4px; }
+.oc-diagram { display: block; width: 100%; max-width: 300px; margin: 8px auto 0; }
+.oc-hole { fill: var(--ink-3); stroke: var(--birch-dim); stroke-width: 1.5; }
+.oc-hole.covered { fill: var(--birch); }
+.oc-hole.target { stroke: var(--lake-hi); stroke-width: 3; }
+.oc-miss { fill: none; stroke: var(--bad); stroke-width: 2; stroke-dasharray: 3 2; }
+.oc-split { stroke: var(--line); stroke-width: 1; }
+.oc-label { fill: var(--muted); font: 10px var(--mono); }
+.oc-stars { color: var(--warn); letter-spacing: 0.1em; }
+.oc-lane { display: flex; gap: 4px; margin-top: 10px; overflow: hidden; }
+.oc-lane-note { flex: 1; min-width: 0; text-align: center; padding: 5px 0; border-radius: 8px; border: 1px solid var(--line); font: 12px var(--mono); color: var(--birch-dim); }
+.oc-lane-note.on { border-color: var(--lake-hi); color: var(--birch); background: var(--ink-3); }
+.oc-lane-note.hit { color: var(--good); border-color: var(--good); }
+.oc-lane-note.miss { color: var(--bad); border-color: var(--bad); }
+.oc-lane-note.rest { color: var(--muted); }
+.oc-takes { display: grid; gap: 6px; margin-top: 12px; }
+.oc-take { display: flex; gap: 8px; align-items: center; font-size: 14px; }
+.oc-take .mono { color: var(--muted); }
+.oc-link { background: none; border: 0; padding: 0; color: var(--lake-hi); text-decoration: underline; font-size: inherit; }
+.oc-stage-tag { position: absolute; left: 18px; top: 18px; padding: 5px 12px; border-radius: 999px; background: rgba(16, 21, 23, 0.8); border: 1px solid var(--lake-hi); font-family: var(--display); font-size: 17px; color: var(--lake-hi); pointer-events: none; }
+.oc-sound { position: absolute; right: 18px; top: 18px; pointer-events: auto; }
