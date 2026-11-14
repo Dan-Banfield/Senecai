@@ -1,7 +1,28 @@
+# Dependencies (run `npm install`)
 node_modules/
+
+# Build output / caches
 dist/
 .vite/
-*.log
-.DS_Store
+coverage/
+*.tsbuildinfo
+
+# Assets fetched/copied by web/scripts/fetch-assets.mjs on `npm run dev`
 web/public/mediapipe/
 web/public/globe/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Local environment / secrets
+.env
+.env.*
+!.env.example
+
+# OS / editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
