@@ -6,7 +6,7 @@
 // Extra solver arguments can be added with SENECAI_SOLVER_ARGS.
 
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { accessSync, constants, existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -29,8 +29,30 @@ function isRunning(name) {
   }
 }
 
+/**
+ * On Linux, Smartgloves II appear as a USB serial port (/dev/ttyACM*), usually
+ * owned by group uucp (Arch) or dialout (Debian/Ubuntu). If we can't open it, neither can the driver.
+ */
+export function checkSerialAccess(log = console.log) {
+  if (process.platform !== 'linux') return true;
+  let ok = true;
+  for (const name of readdirSync('/dev').filter((n) => n.startsWith('ttyACM'))) {
+    try {
+      accessSync(`/dev/${name}`, constants.R_OK | constants.W_OK);
+    } catch {
+      ok = false;
+      log(`[spawn] no permission to open /dev/${name}, so the Rokoko driver can't read the gloves. Fix (then log out and back in):
+           sudo usermod -aG uucp $USER      # Arch / Omarchy
+           sudo usermod -aG dialout $USER   # Debian / Ubuntu
+         or, without logging out: sudo chmod a+rw /dev/${name}   (lasts until the glove is replugged)`);
+    }
+  }
+  return ok;
+}
+
 export function spawnSdk({ log = console.log } = {}) {
   let child = null;
+  checkSerialAccess(log);
   if (isRunning('rkk-hand-solver')) {
     log('[spawn] rkk-hand-solver is already running, using it');
     return { stop() {} };
