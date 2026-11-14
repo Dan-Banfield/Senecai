@@ -298,7 +298,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
   background: var(--paper);
 }
 .app.home .header { background: linear-gradient(rgba(239, 227, 198, 0.95), rgba(239, 227, 198, 0)); }
-.app.home .brand-name { color: var(--sepia); }
 .app.home .search-input { background: rgba(250, 244, 230, 0.85); }
 .app.home .search-results { box-shadow: 0 12px 32px rgba(78, 61, 43, 0.25); }
 .app.home .search-kind { background: var(--ink-3); }

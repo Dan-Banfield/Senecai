@@ -37,7 +37,7 @@ function Shell() {
   return (
       <div className={`app ${home ? 'home' : ''}`}>
         <header className="header">
-          <Brand />
+          {!home && <Brand />}
           <SearchBar />
           <div className="spacer" />
           <SourcePill />
