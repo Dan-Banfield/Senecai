@@ -106,3 +106,41 @@ export function countryAt(features: CountryFeature[], lat: number, lng: number):
   }
   return nearest && nearest.d < 250 ? nearest.name : undefined;
 }
+
+/**
+ * Give each country one of `k` map colours so that neighbours (countries that
+ * share a border) differ, the way a printed atlas colours them. Each country
+ * starts from a colour picked from its name, so the result is stable.
+ */
+export function mapColours(countries: CountryFeature[], k: number): Map<string, number> {
+  const owners = new Map<string, Set<number>>();
+  countries.forEach((f, i) => {
+    const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+    for (const poly of polys)
+      for (const ring of poly)
+        for (const [x, y] of ring) {
+          const key = `${x.toFixed(3)},${y.toFixed(3)}`;
+          let s = owners.get(key);
+          if (!s) owners.set(key, (s = new Set()));
+          s.add(i);
+        }
+  });
+  const adj = countries.map(() => new Set<number>());
+  for (const s of owners.values()) if (s.size > 1) for (const a of s) for (const b of s) if (a !== b) adj[a].add(b);
+  const order = countries.map((_, i) => i).sort((a, b) => adj[b].size - adj[a].size);
+  const colour = new Array<number>(countries.length).fill(-1);
+  for (const i of order) {
+    const used = new Set([...adj[i]].map((j) => colour[j]));
+    let h = 0;
+    for (const ch of countries[i].properties.name) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+    let c = h % k;
+    for (let t = 0; t < k; t++) {
+      if (!used.has((h + t) % k)) {
+        c = (h + t) % k;
+        break;
+      }
+    }
+    colour[i] = c;
+  }
+  return new Map(countries.map((f, i) => [f.properties.name, colour[i]]));
+}

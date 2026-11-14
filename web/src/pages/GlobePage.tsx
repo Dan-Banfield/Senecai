@@ -1,16 +1,15 @@
-// The home page: a night-side Earth under a procedural starry sky. Spin it,
-// click a country to land there, and hover the glowing pins: green for crafts
-// (bright = playable now), pale for crafts still to come.
+// The home page: a globe drawn like an old printed atlas on parchment. Spin
+// it, click a country to land there, and hover the pins to see its crafts.
 
 import Globe, { type GlobeInstance } from 'globe.gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { MeshPhongMaterial } from 'three';
+import { MeshLambertMaterial } from 'three';
 import { community, type Creation } from '../community/api';
 import { DEFAULT_PLACE } from '../community/places';
 import { CRAFTS, craftById, type CraftInfo } from '../crafts/catalog';
-import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries, type CountryFeature } from '../globe/geo';
-import { createStarfield } from '../globe/starfield';
+import { ATLAS_INKS, CRAFT_INK, fadeLimb, graticule, INK, inked, labelElement, mapLabels, seaTexture, zoomBand, type MapLabel } from '../globe/atlas';
+import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries, mapColours, type CountryFeature } from '../globe/geo';
 import { CreationThumb } from '../ui/Thumbnails';
 
 type Pin =
@@ -26,14 +25,12 @@ const CLUSTER_ABOVE = 1.3;
 const UNCLUSTER_BELOW = 1.1;
 const CLUSTER_MIN_PINS = 3;
 const CRAFT_COUNTRIES = new Set(CRAFTS.map((c) => c.country));
-/** Flat, solid-colour globe: plain ocean, opaque countries. */
-const COLORS = {
-  ocean: '#0c1114',
-  land: '#24384a',
-  landCraft: '#2f6b3a',
-  landHover: '#6fae7a',
-  landSelected: '#4a8f57',
-  landSide: 'rgba(95,163,107,0.35)',
+/** Country cap materials, one per colour, lit so the globe shades towards its edge like a printed sphere. */
+const capMaterials = new Map<string, MeshLambertMaterial>();
+const capMaterial = (color: string) => {
+  let m = capMaterials.get(color);
+  if (!m) capMaterials.set(color, (m = new MeshLambertMaterial({ color })));
+  return m;
 };
 
 const locationOf = (c: Creation) => c.location ?? DEFAULT_PLACE;
@@ -114,7 +111,7 @@ function pinElement(pin: Pin, handlers: React.MutableRefObject<PinHandlers>): HT
     el.innerHTML = `<span class="pin-core"></span><span class="pin-count">${n}</span>`;
   } else {
     el.setAttribute('aria-label', pin.kind === 'craft' ? pin.craft.name : pin.creation.title);
-    el.innerHTML = '<span class="pin-core"></span>';
+    el.innerHTML = pin.kind === 'craft' ? `<span class="pin-core"></span><span class="pin-name">${esc(pin.craft.name)}</span>` : '<span class="pin-core"></span>';
   }
   el.addEventListener('pointerenter', () => handlers.current.enter(pin));
   el.addEventListener('pointerleave', () => handlers.current.leave());
@@ -238,6 +235,8 @@ export default function GlobePage() {
   const leaderRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
   const countries = useMemo(loadCountries, []);
+  const inks = useMemo(() => mapColours(countries, ATLAS_INKS.length), [countries]);
+  const labels = useMemo(() => mapLabels(countries), [countries]);
   const hoverRef = useRef<Pin | null>(null);
   const selectedRef = useRef<CountryFeature | null>(null);
   const hoverCountryRef = useRef<string | null>(null);
@@ -290,13 +289,12 @@ export default function GlobePage() {
     if (!g) return;
     const hov = hoverCountryRef.current;
     const sel = selectedRef.current?.properties.name;
-    g.polygonCapColor((d: object) => {
+    g.polygonCapMaterial((d: object) => {
       const n = countryName(d);
-      if (n === sel) return COLORS.landSelected;
-      if (n === hov) return COLORS.landHover;
-      return CRAFT_COUNTRIES.has(n) ? COLORS.landCraft : COLORS.land;
+      const fill = CRAFT_COUNTRIES.has(n) ? CRAFT_INK : ATLAS_INKS[inks.get(n) ?? 0];
+      return capMaterial(n === sel ? inked(fill, 0.22) : n === hov ? inked(fill, 0.12) : fill);
     })
-      .polygonSideColor((d: object) => (countryName(d) === hov || countryName(d) === sel ? COLORS.landSide : 'rgba(0,0,0,0)'))
+      .polygonSideColor((d: object) => (countryName(d) === hov || countryName(d) === sel ? 'rgba(78,61,43,0.45)' : 'rgba(0,0,0,0)'))
       .polygonAltitude((d: object) => (countryName(d) === sel ? 0.02 : countryName(d) === hov ? 0.014 : 0.005));
   };
 
@@ -342,15 +340,22 @@ export default function GlobePage() {
     const mount = mountRef.current!;
     const wrap = wrapRef.current!;
 
-    const g = new Globe(mount, { animateIn: true })
-      .backgroundColor('#03060a')
-      .globeMaterial(new MeshPhongMaterial({ color: COLORS.ocean, shininess: 4 }))
-      .showAtmosphere(true)
-      .atmosphereColor('#7fd1e8')
-      .atmosphereAltitude(0.17)
+    const g = new Globe(mount, { animateIn: true, rendererConfig: { antialias: true, alpha: true } })
+      // Transparent: the parchment behind the canvas is the page itself.
+      .backgroundColor('rgba(0,0,0,0)')
+      .globeMaterial(new MeshLambertMaterial({ map: seaTexture() }))
+      .showAtmosphere(false)
       .polygonsData(countries)
       .polygonsTransitionDuration(260)
-      .polygonStrokeColor(() => 'rgba(242,237,228,0.16)')
+      .polygonStrokeColor(() => INK)
+      .pathsData(graticule())
+      .pathPoints('pts')
+      .pathPointLat((p: [number, number]) => p[0])
+      .pathPointLng((p: [number, number]) => p[1])
+      .pathPointAlt(0.0062)
+      .pathColor(() => 'rgba(78,61,43,0.22)')
+      .pathStroke(null)
+      .pathTransitionDuration(0)
       .polygonLabel((d: object) => {
         const name = countryName(d);
         const crafts = CRAFTS.filter((c) => c.country === name).length;
@@ -363,6 +368,10 @@ export default function GlobePage() {
         refreshPolygons();
       })
       .onZoom(({ altitude }) => {
+        // Letter more of the map the closer you are.
+        const band = zoomBand(altitude);
+        if (wrap.dataset.zoom !== band) wrap.dataset.zoom = band;
+        fadeLimb(mount, g.pointOfView());
         const want = altitude > CLUSTER_ABOVE ? true : altitude < UNCLUSTER_BELOW ? false : clusteredRef.current;
         if (want !== clusteredRef.current) {
           clusteredRef.current = want;
@@ -373,7 +382,7 @@ export default function GlobePage() {
       .htmlLat('lat')
       .htmlLng('lng')
       .htmlAltitude(0.008)
-      .htmlElement((d: object) => pinElement(d as Pin, handlers))
+      .htmlElement((d: object) => ((d as MapLabel).kind === 'label' ? labelElement(d as MapLabel) : pinElement(d as Pin, handlers)))
       .htmlElementVisibilityModifier((el: HTMLElement, visible: boolean) => el.classList.toggle('pin-hidden', !visible))
       .pointOfView(HOME_POV, 0);
     globeRef.current = g;
@@ -385,8 +394,7 @@ export default function GlobePage() {
     controls.autoRotate = false;
     controls.maxDistance = 100 * (1 + 4);
 
-    const sky = createStarfield({ radius: 30000 });
-    g.scene().add(sky.object);
+    wrap.dataset.zoom = zoomBand(HOME_POV.altitude);
 
     const ro = new ResizeObserver(() => g.width(wrap.clientWidth).height(wrap.clientHeight));
     ro.observe(wrap);
@@ -424,11 +432,17 @@ export default function GlobePage() {
     };
     window.addEventListener('keydown', onKey);
 
-    // Per-frame: twinkle, keep the hover card pinned to its dot.
+    // Per-frame: keep the hover card pinned to its dot.
     let raf = 0;
+    let fadedAt = 0;
     const tick = () => {
       raf = requestAnimationFrame(tick);
-      sky.update(performance.now() / 1000);
+      // Labels are created by globe.gl on its own schedule; keep their edge-fade current.
+      const now = performance.now();
+      if (now - fadedAt > 250) {
+        fadedAt = now;
+        fadeLimb(mount, g.pointOfView());
+      }
       const pin = hoverRef.current;
       const card = cardRef.current;
       const leader = leaderRef.current;
@@ -458,7 +472,6 @@ export default function GlobePage() {
       mount.removeEventListener('pointerdown', onDown);
       mount.removeEventListener('pointerup', onUp);
       window.removeEventListener('keydown', onKey);
-      sky.dispose();
       g.pauseAnimation();
       g._destructor();
       globeRef.current = null;
@@ -485,7 +498,9 @@ export default function GlobePage() {
     if (!g) return;
     // Only crafts are pinned; community creations are listed in the country panel instead.
     const pins = buildPins([], new Map(), clustered, openCountry);
-    g.htmlElementsData(pins);
+    g.htmlElementsData([...labels, ...pins]);
+    // New elements start visible; settle which side of the globe they're on.
+    requestAnimationFrame(() => mountRef.current && fadeLimb(mountRef.current, g.pointOfView()));
     // Pin objects are rebuilt: keep an open card on its new pin, or close it if that pin is gone.
     // A craft picked from search only gets a pin once we've landed in its country.
     const pending = pendingCraftRef.current;

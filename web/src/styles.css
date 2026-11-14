@@ -176,7 +176,7 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .globe-loading { height: 100%; display: grid; place-items: center; background: #03060a; color: var(--muted); font-family: var(--mono); font-size: 13px; letter-spacing: 0.1em; }
 
 .globe-page { position: relative; height: 100%; overflow: hidden; background: #03060a; }
-.globe-mount { position: absolute; inset: 0; }
+.globe-mount { position: absolute; inset: 0; z-index: 0; isolation: isolate; }
 .globe-mount canvas { display: block; outline: none; }
 
 /* Pins (globe.gl HTML layer turns pointer events off; pins switch them back on) */
@@ -276,3 +276,112 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .replay-bar input[type='range'] { flex: 1; min-width: 60px; accent-color: var(--forest-hi); }
 .replay-bar .mono { font-size: 12px; color: var(--birch-dim); white-space: nowrap; }
 .thumb-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* ---------- Old-atlas theme for the globe home ---------- */
+/* Parchment paper, brown ink and serif lettering. Scoped to the home page by
+   redefining the palette there, so every panel on it follows. */
+.app.home {
+  --ink: #efe3c6;
+  --ink-2: #f6eedb;
+  --ink-3: #e7d8b6;
+  --line: rgba(92, 70, 45, 0.32);
+  --birch: #3b2e21;
+  --birch-dim: #5e4c38;
+  --muted: #8a7457;
+  --forest: #3f6b34;
+  --forest-hi: #4f7f42;
+  --lake-hi: #3d6b78;
+  --paper: #efe3c6;
+  --sepia: #4e3d2b;
+  color-scheme: light;
+  color: var(--birch);
+  background: var(--paper);
+}
+.app.home .header { background: linear-gradient(rgba(239, 227, 198, 0.95), rgba(239, 227, 198, 0)); }
+.app.home .brand-name { color: var(--sepia); }
+.app.home .search-input { background: rgba(250, 244, 230, 0.85); }
+.app.home .search-results { box-shadow: 0 12px 32px rgba(78, 61, 43, 0.25); }
+.app.home .search-kind { background: var(--ink-3); }
+.app.home .search-kind.craft { color: var(--forest); }
+.app.home .source-pill { background: rgba(250, 244, 230, 0.85); }
+.globe-loading { background: #efe3c6; color: #8a7457; }
+
+/* Paper: warm base, a darker vignette, and a faint fibrous grain. */
+.app.home .globe-page {
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.35 0 0 0 0 0.26 0 0 0 0 0.16 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 50% 45%, #f4ead2 0%, #efe2c3 55%, #e2cfa6 100%);
+}
+/* A ruled double frame round the sheet, like a map plate. */
+.app.home .globe-page::after { content: ''; position: absolute; inset: 10px; border: 1px solid rgba(78, 61, 43, 0.55); box-shadow: inset 0 0 0 3px rgba(239, 227, 198, 0.6), inset 0 0 0 4px rgba(78, 61, 43, 0.3); pointer-events: none; z-index: 5; }
+/* The globe casts a soft printed shadow and has a thin inked rim. */
+.app.home .globe-mount canvas { filter: drop-shadow(0 0 1px rgba(60, 45, 30, 0.85)) drop-shadow(0 6px 26px rgba(92, 70, 40, 0.45)); }
+
+/* Lettering on the map */
+.map-label { pointer-events: none; white-space: nowrap; font-family: var(--display); color: #3b2e21; transition: opacity 0.35s; text-align: center; line-height: 1; }
+.map-country { text-transform: uppercase; letter-spacing: 0.22em; font-weight: 600; text-shadow: 0 0 3px rgba(244, 236, 214, 0.75); }
+.map-country[data-tier='1'] { font-size: 17px; letter-spacing: 0.3em; }
+.map-country[data-tier='2'] { font-size: 12.5px; }
+.map-country[data-tier='3'] { font-size: 9.5px; letter-spacing: 0.14em; }
+.map-ocean, .map-sea { font-style: italic; color: #3f5a63; text-transform: uppercase; }
+.map-ocean { font-size: 13px; letter-spacing: 0.34em; max-width: 120px; white-space: normal; }
+.map-sea { font-size: 11.5px; letter-spacing: 0.12em; text-transform: none; font-size: 13px; }
+.map-capital { font-size: 12.5px; color: #3b2e21; text-shadow: 0 0 3px rgba(244, 236, 214, 0.85); padding-left: 13px; position: relative; }
+.map-capital::before { content: ''; position: absolute; left: 0; top: 50%; width: 5px; height: 5px; margin-top: -4.5px; border-radius: 50%; border: 1.5px solid #3b2e21; background: #f4ecd6; box-shadow: inset 0 0 0 1.2px #f4ecd6, inset 0 0 0 3px #3b2e21; }
+.globe-page[data-zoom='far'] .map-label[data-tier='2'],
+.globe-page[data-zoom='far'] .map-label[data-tier='3'],
+.globe-page[data-zoom='mid'] .map-label[data-tier='3'] { opacity: 0; }
+.globe-page[data-zoom='far'] .map-sea,
+.map-label.limb { opacity: 0; }
+.globe-page[data-zoom='far'] .pin-name,
+.globe-page[data-zoom='mid'] .pin-name { opacity: 0; }
+.pin-name { transition: opacity 0.35s; }
+
+/* Pins as engraved markers: a green-inked roundel with the craft's name beside it. */
+.app.home .pin-playable .pin-core { width: 13px; height: 13px; background: #3f6b34; border: 2px solid #f4ecd6; box-shadow: 0 0 0 1.5px #3b2e21, 0 2px 6px rgba(60, 45, 30, 0.35); }
+.app.home .pin-soon .pin-core { width: 9px; height: 9px; background: #f4ecd6; border: 1.5px solid #3b2e21; box-shadow: none; }
+.app.home .pin-creation .pin-core { width: 7px; height: 7px; background: #8b3a2e; box-shadow: 0 0 0 1.5px #f4ecd6; }
+.app.home .pin-cluster .pin-core { background: rgba(244, 236, 214, 0.9); border: 1.5px solid #3b2e21; box-shadow: 0 0 0 3px rgba(244, 236, 214, 0.6), 0 0 0 4px rgba(59, 46, 33, 0.5); }
+.app.home .pin-count { font: 600 14px var(--display); color: #3b2e21; }
+.pin-name { position: absolute; left: calc(100% + 2px); top: 50%; transform: translateY(-50%); font-family: var(--display); font-style: italic; font-weight: 600; font-size: 14px; color: #2f4f27; white-space: nowrap; text-shadow: 0 0 3px #f4ecd6, 0 0 3px #f4ecd6; pointer-events: none; }
+
+/* Cards and panels: parchment slips with a thin ruled border and small-caps headings. */
+.app.home .globe-card,
+.app.home .globe-about,
+.app.home .country-panel,
+.app.home .float-tooltip-kap,
+.app.home .search-results {
+  background: rgba(246, 238, 219, 0.97) !important;
+  border: 1px solid rgba(78, 61, 43, 0.6) !important;
+  border-radius: 3px !important;
+  box-shadow: inset 0 0 0 3px rgba(246, 238, 219, 1), inset 0 0 0 4px rgba(78, 61, 43, 0.25), 0 14px 40px rgba(78, 61, 43, 0.28) !important;
+  color: var(--birch) !important;
+  backdrop-filter: none;
+}
+.app.home .globe-card img { border-bottom: 1px solid rgba(78, 61, 43, 0.4); filter: sepia(0.25) saturate(0.85); }
+.app.home .gc-thumb { background: var(--ink-3); }
+.app.home .gc-eyebrow, .app.home .gc-eyebrow.lake { color: #6b4f2f; font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: none; font-style: italic; }
+.app.home .gc-playable { color: var(--forest); }
+.app.home .gc-skills b { background: transparent; border: 1px solid rgba(78, 61, 43, 0.4); color: var(--birch-dim); font-family: var(--display); font-size: 13px; border-radius: 2px; }
+.app.home .globe-card h3, .app.home .country-panel h2 { font-variant: small-caps; letter-spacing: 0.03em; }
+.app.home .globe-leader { background: linear-gradient(90deg, rgba(78, 61, 43, 0.9), rgba(78, 61, 43, 0.3)); }
+.app.home .country-count { color: var(--forest); }
+.app.home .country-panel h4 { font-family: var(--display); font-size: 14px; font-variant: small-caps; text-transform: none; letter-spacing: 0.06em; }
+.app.home .country-list button, .app.home .country-list a { background: rgba(255, 252, 242, 0.5); border-radius: 3px; }
+.app.home .country-list button:hover, .app.home .country-list a:hover { border-color: rgba(63, 107, 52, 0.55); background: rgba(63, 107, 52, 0.07); }
+.app.home .country-list em { background: var(--ink-3); }
+.app.home .country-list em.playable { background: rgba(63, 107, 52, 0.15); color: var(--forest); }
+.app.home .btn { border-radius: 3px; }
+.app.home .btn.primary { color: #f6eedb; }
+
+/* Caption, key and hint */
+.app.home .globe-caption { left: 34px; bottom: 34px; }
+.app.home .globe-lede { color: #3b2e21; text-shadow: 0 0 12px rgba(244, 236, 214, 0.9); }
+.app.home .globe-lede em { color: var(--forest); }
+.app.home .globe-legend { color: var(--birch-dim); font-family: var(--display); font-size: 15px; }
+.app.home .lg-playable { width: 11px; height: 11px; background: #3f6b34; border: 2px solid #f4ecd6; box-shadow: 0 0 0 1.5px #3b2e21; }
+.app.home .lg-soon { background: #f4ecd6; border: 1.5px solid #3b2e21; box-shadow: none; }
+.app.home .lg-creation { background: #8b3a2e; box-shadow: none; }
+.app.home .globe-hint { color: rgba(78, 61, 43, 0.6); font-family: var(--display); font-style: italic; font-size: 14px; letter-spacing: 0.04em; bottom: 20px; }
+.app.home .globe-about-toggle { background: rgba(246, 238, 219, 0.9); border: 1px solid rgba(78, 61, 43, 0.55); border-radius: 3px; color: var(--birch); font-family: var(--display); font-size: 15px; font-variant: small-caps; right: 30px; bottom: 30px; }
+.app.home .globe-about { right: 30px; }

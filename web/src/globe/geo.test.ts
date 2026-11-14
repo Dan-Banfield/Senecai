@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { PLACES } from '../community/places';
 import { generateSeeds } from '../community/seed';
 import { CRAFTS } from '../crafts/catalog';
-import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries } from './geo';
+import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries, mapColours } from './geo';
 
 const countries = loadCountries();
 const names = new Set(countries.map((c) => c.properties.name));
@@ -43,5 +43,13 @@ describe('globe geography', () => {
     const learned = seeds.filter((s) => s.learnedFrom);
     expect(learned.length).toBeGreaterThanOrEqual(2);
     for (const s of learned) expect(ids).toContain(s.learnedFrom!.id);
+  });
+
+  it('colours neighbouring countries differently, like a printed atlas', () => {
+    const countries = loadCountries();
+    const ink = mapColours(countries, 6);
+    for (const [a, b] of [['Finland', 'Sweden'], ['Finland', 'Russia'], ['Norway', 'Sweden'], ['France', 'Spain'], ['Germany', 'Poland'], ['United States of America', 'Canada'], ['Brazil', 'Argentina']]) {
+      expect(ink.get(a)).not.toBe(ink.get(b));
+    }
   });
 });

@@ -4,7 +4,7 @@
 
 Junction 2026 · Rokoko track: *"Use professional motion capture to control robotic hands… useful, unexpected, or downright unbelievable."*
 
-- **The globe** (home page): a flat-coloured Earth under a procedural starry sky (craft countries in green). Drag to spin, click a country to land, click outside it or press Esc to zoom back out, or use the search bar to find a country, region or craft. Pins mark where each craft comes from, and hover cards show a photo, the story, and what the craft would teach a robot. When zoomed out, crowded countries collapse into one cluster; clicking it lands there.
+- **The globe** (home page): a globe drawn like an old printed atlas on parchment: pastel countries (neighbours in different colours, craft countries in green), a mottled sea with a latitude/longitude grid, and serif lettering for countries, oceans and capitals that fills in as you zoom. Drag to spin, click a country to land, click outside it or press Esc to zoom back out, or use the search bar to find a country, region or craft. Pins mark where each craft comes from, and hover cards show a photo, the story, and what the craft would teach a robot. When zoomed out, crowded countries collapse into one cluster; clicking it lands there.
 - **Kantele** (Finland's five-string national instrument): one finger per string, which maps directly onto a five-finger robot hand. Guided lessons with a ghost hand, a rhythm-game timing mode, and free play with recording.
 - **Puukko workbench** (the Finnish belt knife): a virtual smithy and carving table. Close your hand over a tool to pick it up and squeeze to use it. Heat the bar in the forge, hammer the blade out on the anvil, quench it, sharpen it, then carve the birch handle and fit the blade. For the handle, your other hand picks up the blank with a fist and holds it; it follows that hand in 3D and turns as your wrist turns. The knife takes a shaving wherever you draw it across the wood, and how hard you squeeze sets the depth, from a thin curl to a deep bite. The wood is a density field drawn as a smooth surface with real grain, so cuts thinner than a voxel show.
 - **Recordings remember everything**: both robot hands, the tool each one holds, and every change made to the workpiece, frame by frame. Replays rebuild the object's mesh exactly as it was made, and you can scrub through them.
@@ -106,7 +106,7 @@ web/src/bench/          craft workbench: core (ops, bench state), session (input
 web/src/recording/      kantele (v1) demonstration recording / playback / export
 web/src/community/      CommunityApi + fake backend (localStorage + procedurally generated seeds), places
 web/src/crafts/catalog.ts  every craft on the globe: region, story, robot skills, photo credit
-web/src/globe/          country shapes + geo helpers, procedural starfield
+web/src/globe/          country shapes + geo helpers, atlas styling (colours, sea, graticule, labels)
 web/public/crafts/      craft photos (Wikimedia Commons, resized)
 web/src/pages, ui/      React pages and components
 ```
