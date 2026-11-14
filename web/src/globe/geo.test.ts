@@ -1,6 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { PLACES } from '../community/places';
-import { generateSeeds } from '../community/seed';
 import { CRAFTS } from '../crafts/catalog';
 import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries, mapColours } from './geo';
 
@@ -18,10 +16,8 @@ describe('globe geography', () => {
     expect(countryAt(countries, 0, -30)).toBeUndefined(); // mid-Atlantic
   });
 
-  it('every craft, place and seed names a country that exists on the map', () => {
+  it('every craft names a country that exists on the map', () => {
     for (const c of CRAFTS) expect(names, c.id).toContain(c.country);
-    for (const p of PLACES) expect(names, p.place).toContain(p.country);
-    for (const s of generateSeeds()) expect(names, s.id).toContain(s.location?.country);
   });
 
   it('craft pins sit inside (or right next to) their country', () => {
@@ -35,14 +31,6 @@ describe('globe geography', () => {
     expect(altitudeForSpan(v.spanDeg)).toBeLessThan(0.8);
     const rus = countries.find((c) => c.properties.name === 'Russia')!;
     expect(altitudeForSpan(countryView(rus).spanDeg)).toBeGreaterThan(1.5);
-  });
-
-  it('learned-from seeds point at real seeds', () => {
-    const seeds = generateSeeds();
-    const ids = new Set(seeds.map((s) => s.id));
-    const learned = seeds.filter((s) => s.learnedFrom);
-    expect(learned.length).toBeGreaterThanOrEqual(2);
-    for (const s of learned) expect(ids).toContain(s.learnedFrom!.id);
   });
 
   it('colours neighbouring countries differently, like a printed atlas', () => {

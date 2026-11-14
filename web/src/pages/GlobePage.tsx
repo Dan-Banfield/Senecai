@@ -5,18 +5,14 @@ import Globe, { type GlobeInstance } from 'globe.gl';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { MeshLambertMaterial } from 'three';
-import { community, type Creation } from '../community/api';
-import { DEFAULT_PLACE } from '../community/places';
 import { CRAFTS, craftById, type CraftInfo } from '../crafts/catalog';
 import { ATLAS_INKS, CRAFT_INK, fadeLimb, graticule, INK, inked, labelElement, mapLabels, seaTexture, zoomBand, type MapLabel } from '../globe/atlas';
 import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries, mapColours, type CountryFeature } from '../globe/geo';
-import { CreationThumb } from '../ui/Thumbnails';
 
 type Pin =
   | { id: string; kind: 'craft'; lat: number; lng: number; craft: CraftInfo }
-  | { id: string; kind: 'creation'; lat: number; lng: number; creation: Creation }
   /** Zoomed out, a crowded country collapses into one pin; clicking it lands there. */
-  | { id: string; kind: 'cluster'; lat: number; lng: number; country: string; crafts: CraftInfo[]; creations: Creation[] };
+  | { id: string; kind: 'cluster'; lat: number; lng: number; country: string; crafts: CraftInfo[] };
 
 const HOME_POV = { lat: 50, lng: 14, altitude: 2.3 };
 const CARD_W = 300;
@@ -33,7 +29,6 @@ const capMaterial = (color: string) => {
   return m;
 };
 
-const locationOf = (c: Creation) => c.location ?? DEFAULT_PLACE;
 const countryName = (d: object) => (d as CountryFeature).properties.name;
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
 
@@ -53,37 +48,25 @@ function sphericalMean(points: { lat: number; lng: number }[]) {
 }
 
 /**
- * Pins for crafts and creations. When `clustered`, any country with several
- * pins becomes one cluster pin (except `openCountry`, the one we've landed on).
- * Remaining pins are nudged apart where they would overlap.
+ * Pins for crafts. When `clustered`, any country with several pins becomes one
+ * cluster pin (except `openCountry`, the one we've landed on). Remaining pins
+ * are nudged apart where they would overlap.
  */
-function buildPins(creations: Creation[], countryOf: Map<string, string | undefined>, clustered: boolean, openCountry?: string): Pin[] {
+function buildPins(clustered: boolean, openCountry?: string): Pin[] {
   let crafts = CRAFTS;
-  let made = creations;
   const clusters: Pin[] = [];
   if (clustered) {
-    const groups = new Map<string, { crafts: CraftInfo[]; creations: Creation[] }>();
-    const group = (n: string) => groups.get(n) ?? groups.set(n, { crafts: [], creations: [] }).get(n)!;
-    for (const c of CRAFTS) group(c.country).crafts.push(c);
-    for (const c of creations) {
-      const n = countryOf.get(c.id);
-      if (n) group(n).creations.push(c);
-    }
+    const groups = new Map<string, CraftInfo[]>();
+    for (const c of CRAFTS) groups.set(c.country, [...(groups.get(c.country) ?? []), c]);
     const collapsed = new Set<string>();
     for (const [country, g] of groups) {
-      if (country === openCountry || g.crafts.length + g.creations.length < CLUSTER_MIN_PINS) continue;
+      if (country === openCountry || g.length < CLUSTER_MIN_PINS) continue;
       collapsed.add(country);
-      const centre = sphericalMean([...g.crafts, ...g.creations.map(locationOf)]);
-      clusters.push({ id: `cluster-${country}`, kind: 'cluster', ...centre, country, ...g });
+      clusters.push({ id: `cluster-${country}`, kind: 'cluster', ...sphericalMean(g), country, crafts: g });
     }
     crafts = CRAFTS.filter((c) => !collapsed.has(c.country));
-    made = creations.filter((c) => !collapsed.has(countryOf.get(c.id) ?? ''));
   }
-  const pins: Pin[] = [
-    ...clusters,
-    ...crafts.map((craft): Pin => ({ id: `craft-${craft.id}`, kind: 'craft', lat: craft.lat, lng: craft.lng, craft })),
-    ...made.map((creation): Pin => ({ id: `creation-${creation.id}`, kind: 'creation', lat: locationOf(creation).lat, lng: locationOf(creation).lng, creation })),
-  ];
+  const pins: Pin[] = [...clusters, ...crafts.map((craft): Pin => ({ id: `craft-${craft.id}`, kind: 'craft', lat: craft.lat, lng: craft.lng, craft }))];
   const placed: Pin[] = [];
   for (const pin of pins) {
     let k = 0;
@@ -106,12 +89,12 @@ function pinElement(pin: Pin, handlers: React.MutableRefObject<PinHandlers>): HT
   el.className = `pin pin-${pin.kind}${pin.kind === 'craft' ? ` pin-${pin.craft.status}` : ''}`;
   el.dataset.pinId = pin.id;
   if (pin.kind === 'cluster') {
-    const n = pin.crafts.length + pin.creations.length;
-    el.setAttribute('aria-label', `${pin.country}: ${n} crafts and creations`);
+    const n = pin.crafts.length;
+    el.setAttribute('aria-label', `${pin.country}: ${n} crafts`);
     el.innerHTML = `<span class="pin-core"></span><span class="pin-count">${n}</span>`;
   } else {
-    el.setAttribute('aria-label', pin.kind === 'craft' ? pin.craft.name : pin.creation.title);
-    el.innerHTML = pin.kind === 'craft' ? `<span class="pin-core"></span><span class="pin-name">${esc(pin.craft.name)}</span>` : '<span class="pin-core"></span>';
+    el.setAttribute('aria-label', pin.craft.name);
+    el.innerHTML = `<span class="pin-core"></span><span class="pin-name">${esc(pin.craft.name)}</span>`;
   }
   el.addEventListener('pointerenter', () => handlers.current.enter(pin));
   el.addEventListener('pointerleave', () => handlers.current.leave());
@@ -169,7 +152,7 @@ function ClusterCard({ pin, onLand }: { pin: Extract<Pin, { kind: 'cluster' }>; 
     <div className="gc-body">
       <div className="gc-eyebrow">{pin.country}</div>
       <h3>
-        {pin.crafts.length} craft{pin.crafts.length === 1 ? '' : 's'} · {pin.creations.length} creation{pin.creations.length === 1 ? '' : 's'}
+        {pin.crafts.length} craft{pin.crafts.length === 1 ? '' : 's'}
       </h3>
       {pin.crafts.length > 0 && (
         <div className="gc-mosaic">
@@ -196,35 +179,6 @@ function ClusterCard({ pin, onLand }: { pin: Extract<Pin, { kind: 'cluster' }>; 
   );
 }
 
-function CreationCard({ creation }: { creation: Creation }) {
-  const craft = craftById(creation.craft);
-  return (
-    <>
-      <div className="gc-thumb">
-        <CreationThumb creation={creation} />
-      </div>
-      <div className="gc-body">
-        <div className="gc-eyebrow lake">{locationOf(creation).place} · community</div>
-        <h3>{creation.title}</h3>
-        <p>
-          {craft?.name} by {creation.author}
-          {creation.score !== undefined ? ` · score ${creation.score}` : ''}
-          {creation.learnedFrom ? ` · learned from ${creation.learnedFrom.author}` : ''}
-        </p>
-        {creation.description && <p className="gc-quote">"{creation.description}"</p>}
-        <div className="gc-foot">
-          <Link className="btn small primary" to={`/community/${creation.id}`}>
-            Watch the robot
-          </Link>
-          <Link className="btn small" to={creation.craft === 'kantele' ? `/kantele?from=${creation.id}` : `/craft/${creation.craft}?from=${creation.id}`}>
-            Learn this
-          </Link>
-        </div>
-      </div>
-    </>
-  );
-}
-
 export default function GlobePage() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -242,20 +196,11 @@ export default function GlobePage() {
   const hoverCountryRef = useRef<string | null>(null);
   const hideTimer = useRef(0);
   const flyTimer = useRef(0);
-  const creationsRef = useRef<Creation[]>([]);
-  /** Creation id -> country name, computed once per data load. */
-  const creationCountryRef = useRef(new Map<string, string | undefined>());
 
-  const [creations, setCreations] = useState<Creation[]>([]);
   const [hover, setHover] = useState<Pin | null>(null);
   const [selected, setSelected] = useState<CountryFeature | null>(null);
   const [clustered, setClustered] = useState(true);
   const clusteredRef = useRef(true);
-  const creationCountry = useMemo(
-    () => new Map(creations.map((c) => [c.id, locationOf(c).country ?? countryAt(countries, locationOf(c).lat, locationOf(c).lng)])),
-    [creations, countries],
-  );
-  creationCountryRef.current = creationCountry;
 
   const showCard = (pin: Pin) => {
     clearTimeout(hideTimer.current);
@@ -277,7 +222,6 @@ export default function GlobePage() {
     // First tap on touch screens just shows the card.
     if (hoverRef.current?.id !== pin.id) return showCard(pin);
     if (pin.kind === 'cluster') landIn(pin.country);
-    else if (pin.kind === 'creation') navigate(`/community/${pin.creation.id}`);
     else if (pin.craft.route) navigate(pin.craft.route);
   };
   const handlers = useRef<PinHandlers>({ enter: showCard, leave: scheduleHide, click: openPin });
@@ -357,9 +301,7 @@ export default function GlobePage() {
       .polygonLabel((d: object) => {
         const name = countryName(d);
         const crafts = CRAFTS.filter((c) => c.country === name).length;
-        const made = creationsRef.current.filter((c) => creationCountryRef.current.get(c.id) === name).length;
-        const parts = [crafts && `${crafts} craft${crafts > 1 ? 's' : ''}`, made && `${made} creation${made > 1 ? 's' : ''}`].filter(Boolean);
-        return `<div class="country-tip"><b>${esc(name)}</b><span>${parts.length ? parts.join(' · ') : 'click to land'}</span></div>`;
+        return `<div class="country-tip"><b>${esc(name)}</b><span>${crafts ? `${crafts} craft${crafts > 1 ? 's' : ''}` : 'click to land'}</span></div>`;
       })
       .onPolygonHover((d: object | null) => {
         hoverCountryRef.current = d ? countryName(d) : null;
@@ -478,24 +420,11 @@ export default function GlobePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void community.list().then((list) => !cancelled && setCreations(list));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    creationsRef.current = creations;
-  }, [creations]);
-
   const openCountry = selected?.properties.name;
   useEffect(() => {
     const g = globeRef.current;
     if (!g) return;
-    // Only crafts are pinned; community creations are listed in the country panel instead.
-    const pins = buildPins([], new Map(), clustered, openCountry);
+    const pins = buildPins(clustered, openCountry);
     g.htmlElementsData([...labels, ...pins]);
     // New elements start visible; settle which side of the globe they're on.
     requestAnimationFrame(() => mountRef.current && fadeLimb(mountRef.current, g.pointOfView()));
@@ -535,9 +464,8 @@ export default function GlobePage() {
     return {
       name,
       crafts: CRAFTS.filter((c) => c.country === name),
-      creations: creations.filter((c) => creationCountry.get(c.id) === name),
     };
-  }, [selected, creations, creationCountry]);
+  }, [selected]);
 
   const focusCraft = (craft: CraftInfo) => {
     const pin = globeRef.current?.htmlElementsData().find((p) => (p as Pin).id === `craft-${craft.id}`) as Pin | undefined;
@@ -555,7 +483,7 @@ export default function GlobePage() {
           </button>
           <h2>{here.name}</h2>
           <div className="country-count">
-            {here.crafts.length} craft{here.crafts.length === 1 ? '' : 's'} · {here.creations.length} creation{here.creations.length === 1 ? '' : 's'}
+            {here.crafts.length} craft{here.crafts.length === 1 ? '' : 's'}
           </div>
           {here.crafts.length > 0 && (
             <ul className="country-list">
@@ -573,27 +501,8 @@ export default function GlobePage() {
               ))}
             </ul>
           )}
-          {here.creations.length > 0 && (
-            <>
-              <h4>Made here</h4>
-              <ul className="country-list creations">
-                {here.creations.map((c) => (
-                  <li key={c.id}>
-                    <Link to={`/community/${c.id}`}>
-                      <span>
-                        <b>{c.title}</b>
-                        <small>
-                          {craftById(c.craft)?.name} · {c.author}
-                        </small>
-                      </span>
-                    </Link>
-                  </li>
-                ))}
-              </ul>
-            </>
-          )}
-          {!here.crafts.length && !here.creations.length && (
-            <p className="country-empty">No crafts mapped in {here.name} yet. Every recording shared from here puts it on the map.</p>
+          {!here.crafts.length && (
+            <p className="country-empty">No crafts mapped in {here.name} yet.</p>
           )}
         </aside>
       )}
@@ -603,7 +512,6 @@ export default function GlobePage() {
         {hover && (
           <div key={hover.id} className="gc-inner">
             {hover.kind === 'craft' && <CraftCard craft={hover.craft} />}
-            {hover.kind === 'creation' && <CreationCard creation={hover.creation} />}
             {hover.kind === 'cluster' && <ClusterCard pin={hover} onLand={() => landIn(hover.country)} />}
           </div>
         )}

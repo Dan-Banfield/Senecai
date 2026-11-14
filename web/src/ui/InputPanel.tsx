@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { calibrationKey, usePipeline } from '../input/pipeline';
 import { KEYBOARD_HELP } from '../input/keyboardSource';
+import type { Rotation } from '../input/gloveTracker';
 import { SOURCE_LABELS, type SourceKind } from '../input/types';
 
 const SOURCES: { kind: SourceKind; icon: string; desc: string }[] = [
   { kind: 'webcam', icon: '📷', desc: 'Emulates the gloves with webcam hand tracking. Same Rokoko JSON v3 frames, no hardware.' },
-  { kind: 'fused', icon: '🧤📷', desc: 'Best with Smartgloves: the gloves drive your fingers and wrist, the webcam tracks where your hands are. Needs the bridge (npm run bridge:sdk) and a camera.' },
+  { kind: 'fused', icon: '🧤📷', desc: 'Best with Smartgloves: the gloves drive your fingers and wrist, a camera looking down at the table tracks where the gloves are. Needs the bridge (npm run bridge:sdk) and an overhead camera.' },
   { kind: 'gloves', icon: '🧤', desc: 'Rokoko Device SDK (Linux, macOS, Windows) or Rokoko Studio → bridge (npm run bridge) → here. Without a Coil Pro the gloves can\'t track where your hands are, so you aim by tilting your wrist.' },
   { kind: 'keyboard', icon: '⌨️', desc: KEYBOARD_HELP },
 ];
@@ -24,7 +25,6 @@ export function SourcePill() {
 
 export function CalibrationWizard({ onClose }: { onClose: () => void }) {
   const calibrate = usePipeline((s) => s.calibrate);
-  const piano = usePipeline((s) => s.calibrationContext === 'piano');
   const [step, setStep] = useState<'open' | 'fist' | 'done'>('open');
   const [count, setCount] = useState(3);
   const [error, setError] = useState('');
@@ -50,29 +50,10 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
     <>
       <div className="modal-backdrop" onClick={onClose} />
       <div className="modal">
-        <h2>{piano ? 'Calibrate for the piano' : 'Calibrate your hand'}</h2>
-        {piano ? (
-          <>
-            {step === 'open' && (
-              <p>
-                Put both hands in <b>piano position</b> on a table in front of you: palms down, wrists level, fingers gently curved with the fingertips just touching the table, thumbs
-                resting beside them. This is where the robot's hands will sit on the keys: right thumb on middle C, left hand an octave lower.
-              </p>
-            )}
-            {step === 'fist' && (
-              <p>
-                Now <b>press down</b> with every finger and thumb, curling them as if playing a loud chord deep into the keys. Keep your hands where they are.
-              </p>
-            )}
-            {step === 'done' && <p>Done. Lift a finger and press it down to play a key; move your hands to reach other notes.</p>}
-          </>
-        ) : (
-          <>
-            {step === 'open' && <p>Hold your hand <b>open and relaxed</b>, in a comfortable spot in front of you. This sets "open", the neutral wrist angle, and the centre of your workspace.</p>}
-            {step === 'fist' && <p>Now make a <b>tight fist</b> with your thumb tucked across your fingers.</p>}
-            {step === 'done' && <p>Done. The robot hand now follows your range of motion. Recalibrate any time.</p>}
-          </>
-        )}
+        <h2>Calibrate your hand</h2>
+        {step === 'open' && <p>Hold your hand <b>open and relaxed</b>, in a comfortable spot in front of you. This sets "open", the neutral wrist angle, and the centre of your workspace.</p>}
+        {step === 'fist' && <p>Now make a <b>tight fist</b> with your thumb tucked across your fingers.</p>}
+        {step === 'done' && <p>Done. The robot hand now follows your range of motion. Recalibrate any time.</p>}
         {step !== 'done' ? <div className="calib-big">{count}</div> : <div className="calib-big">✓</div>}
         {error && <p style={{ color: 'var(--warn)' }}>{error}</p>}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
@@ -85,11 +66,34 @@ export function CalibrationWizard({ onClose }: { onClose: () => void }) {
   );
 }
 
+/** The cameras the browser can see. Their names only appear once camera permission has been granted, so re-read when the input's status changes. */
+function useCameras(enabled: boolean, statusState: string) {
+  const [cameras, setCameras] = useState<MediaDeviceInfo[]>([]);
+  useEffect(() => {
+    const media = navigator.mediaDevices;
+    if (!enabled || !media?.enumerateDevices) return;
+    let cancelled = false;
+    const read = () =>
+      void media
+        .enumerateDevices()
+        .then((all) => !cancelled && setCameras(all.filter((d) => d.kind === 'videoinput' && d.deviceId)))
+        .catch(() => {});
+    read();
+    media.addEventListener('devicechange', read);
+    return () => {
+      cancelled = true;
+      media.removeEventListener('devicechange', read);
+    };
+  }, [enabled, statusState]);
+  return cameras;
+}
+
 export function InputPanel() {
   const { panelOpen, setPanelOpen, kind, status, start, stop, settings, updateSettings, resetCalibration, calibrations, calibrationContext, fps } = usePipeline();
   const calibrated = kind ? !!calibrations[calibrationKey(kind, calibrationContext)] : false;
   const [calibrating, setCalibrating] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState(settings.bridgeUrl);
+  const cameras = useCameras(panelOpen, status.state);
   if (!panelOpen) return calibrating ? <CalibrationWizard onClose={() => setCalibrating(false)} /> : null;
 
   return (
@@ -124,7 +128,6 @@ export function InputPanel() {
           <div className="card">
             <h3>Calibration</h3>
             <p>
-              {calibrationContext === 'piano' ? 'For the piano: ' : ''}
               {calibrated ? 'Calibrated for this input.' : 'Using defaults (auto-range is on). A 6-second calibration makes it feel much better.'}
             </p>
             <div className="row" style={{ marginTop: 12 }}>
@@ -155,6 +158,28 @@ export function InputPanel() {
               <option value="left">Left</option>
             </select>
           </label>
+          <label className="field">
+            Camera (hand tracking)
+            <select value={cameras.some((c) => c.deviceId === settings.cameraId) ? settings.cameraId : ''} onChange={(e) => updateSettings({ cameraId: e.target.value })}>
+              <option value="">Default camera</option>
+              {cameras.map((c, i) => (
+                <option key={c.deviceId} value={c.deviceId}>
+                  {c.label || `Camera ${i + 1}`}
+                </option>
+              ))}
+            </select>
+          </label>
+          {kind === 'fused' && (
+            <label className="field">
+              Turn the overhead picture so you sit at its bottom
+              <select value={settings.cameraRotation ?? 0} onChange={(e) => updateSettings({ cameraRotation: Number(e.target.value) as Rotation })}>
+                <option value={0}>Not turned</option>
+                <option value={90}>90° clockwise</option>
+                <option value={180}>Upside down (180°)</option>
+                <option value={270}>90° anticlockwise</option>
+              </select>
+            </label>
+          )}
           <label className="toggle">
             <input type="checkbox" checked={settings.swapHands} onChange={(e) => updateSettings({ swapHands: e.target.checked })} /> Swap left/right (webcam)
           </label>

@@ -1,7 +1,9 @@
-// Rokoko gloves + webcam. Smartgloves measure fingers and wrist rotation very
-// well but can't tell where the hand is in space (that needs a Coil Pro); the
-// webcam is the opposite. So the gloves drive the fingers and the wrist's
-// orientation, and the webcam only says where each hand is.
+// Rokoko gloves + an overhead camera. Smartgloves measure fingers and wrist
+// rotation very well but can't tell where the hand is in space (that needs a
+// Coil Pro); a camera looking down at the table can. So the gloves drive the
+// fingers and the wrist's orientation, and the camera only says where each
+// gloved hand is (overheadCamera.ts: it tracks the black gloves themselves,
+// which a bare-hand tracker can't recognise).
 //
 // Every glove frame is passed on with each hand's joints moved, as a whole, to
 // where the camera last saw that hand. Nothing else about the glove data
@@ -12,7 +14,8 @@
 import type { JointFrame, RokokoFrame, Side } from '../rokoko/types';
 import { GlovesSource } from './glovesSource';
 import type { HandSource, SourceStatus } from './types';
-import { WebcamSource } from './webcamSource';
+import { OverheadGloveCamera } from './overheadCamera';
+import type { Rotation } from './gloveTracker';
 
 type P = { x: number; y: number; z: number };
 
@@ -47,14 +50,16 @@ export function placeHands(f: RokokoFrame, seen: Partial<Record<Side, { p: P }>>
 export class FusedSource implements HandSource {
   readonly kind = 'fused' as const;
   readonly gloves: GlovesSource;
-  readonly webcam = new WebcamSource();
+  readonly camera = new OverheadGloveCamera();
   /** Where the camera last saw each hand (Rokoko metres), and when. */
   private seen: Partial<Record<Side, { p: P; at: number }>> = {};
   private status = { gloves: 'Connecting to the gloves…', camera: 'Starting the camera…', live: false };
 
-  constructor(bridgeUrl: string, swapHands = false) {
+  constructor(bridgeUrl: string, swapHands = false, cameraId = '', rotation: Rotation = 0) {
     this.gloves = new GlovesSource(bridgeUrl);
-    this.webcam.swapHands = swapHands;
+    this.camera.swapHands = swapHands;
+    this.camera.cameraId = cameraId;
+    this.camera.rotation = rotation;
   }
 
   async start(onFrame: (f: RokokoFrame) => void, onStatus: (s: SourceStatus) => void) {
@@ -85,7 +90,7 @@ export class FusedSource implements HandSource {
         this.status.live = s.state === 'live';
         report();
       }),
-      this.webcam
+      this.camera
         .start(onCamera, (s) => {
           this.status.camera = s.state === 'live' ? 'camera tracking' : s.message;
           report();
@@ -99,7 +104,7 @@ export class FusedSource implements HandSource {
 
   stop() {
     this.gloves.stop();
-    this.webcam.stop();
+    this.camera.stop();
     this.seen = {};
   }
 }

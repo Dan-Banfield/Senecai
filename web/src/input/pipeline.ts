@@ -12,6 +12,7 @@ import { parseFrame, type HumanHands } from '../rokoko/parse';
 import type { RokokoFrame, Side } from '../rokoko/types';
 import { captureFist, captureOpen, defaultCalibration, Retargeter, toInspireAngles, type Calibration, type RobotHandCommand } from '../robot/retarget';
 import { FusedSource } from './fusedSource';
+import type { Rotation } from './gloveTracker';
 import { DEFAULT_BRIDGE_URL, GlovesSource } from './glovesSource';
 import { KeyboardSource } from './keyboardSource';
 import type { HandSource, SourceKind, SourceStatus } from './types';
@@ -35,6 +36,10 @@ export interface Settings {
   swapHands: boolean;
   bridgeUrl: string;
   mirrorRobot: boolean;
+  /** The camera hand tracking uses (a MediaDeviceInfo.deviceId); empty or missing means the browser's default. */
+  cameraId?: string;
+  /** How far to turn the overhead camera's picture (clockwise) so you sit at its bottom edge. */
+  cameraRotation?: Rotation;
 }
 
 interface PipelineStore {
@@ -112,11 +117,11 @@ export const usePipeline = create<PipelineStore>()(
 
         const source: HandSource =
           kind === 'webcam'
-            ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands })
+            ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands, cameraId: settings.cameraId ?? '' })
             : kind === 'gloves'
               ? new GlovesSource(settings.bridgeUrl)
               : kind === 'fused'
-                ? new FusedSource(settings.bridgeUrl, settings.swapHands)
+                ? new FusedSource(settings.bridgeUrl, settings.swapHands, settings.cameraId ?? '', settings.cameraRotation ?? 0)
                 : new KeyboardSource();
         live.source = source;
         set({ kind, lastKind: kind, status: { state: 'starting', message: 'Starting…' } });
@@ -141,9 +146,11 @@ export const usePipeline = create<PipelineStore>()(
       updateSettings(s) {
         set({ settings: { ...get().settings, ...s } });
         if (live.source instanceof WebcamSource && s.swapHands !== undefined) live.source.swapHands = s.swapHands;
-        if (live.source instanceof FusedSource && s.swapHands !== undefined) live.source.webcam.swapHands = s.swapHands;
+        if (live.source instanceof FusedSource && s.swapHands !== undefined) live.source.camera.swapHands = s.swapHands;
         const kind = get().kind;
         if (s.bridgeUrl !== undefined && (kind === 'gloves' || kind === 'fused')) void get().start(kind);
+        else if (s.cameraId !== undefined && (kind === 'webcam' || kind === 'fused')) void get().start(kind);
+        else if (s.cameraRotation !== undefined && kind === 'fused') void get().start(kind);
       },
 
       calibrate(step) {

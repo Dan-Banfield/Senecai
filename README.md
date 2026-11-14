@@ -6,7 +6,7 @@ Junction 2026 · Rokoko track: *"Use professional motion capture to control robo
 
 - **The globe** (home page): a globe drawn like an old printed atlas on parchment: pastel countries (neighbours in different colours, craft countries in green), a mottled sea with a latitude/longitude grid, and serif lettering for countries, oceans and capitals that fills in as you zoom. Drag to spin, click a country to land, click outside it or press Esc to zoom back out, or use the search bar to find a country, region or craft. Pins mark where each craft comes from, and hover cards show a photo, the story, and what the craft would teach a robot. When zoomed out, crowded countries collapse into one cluster; clicking it lands there.
 - **Piano** (Florence, where Bartolomeo Cristofori built the first one around 1700): both robot hands at a two-and-a-half-octave keyboard, learning *Mary Had a Little Lamb* (the next key glows; "Listen first" plays it). Notes come from collisions, not finger angles: each robot fingertip's real position is computed from the hand's joints, a key goes down only as far as a fingertip pushes it, sounds near the bottom of its travel, and stops the finger (the hand rides up) when it bottoms out. Calibrating on this page uses your piano position as the rest pose: hands resting as if on the keys put the robot's right thumb on middle C.
-- **Kantele** (Finland's five-string national instrument): one finger per string, which maps directly onto a five-finger robot hand. Guided lessons with a ghost hand, a rhythm-game timing mode, and free play with recording.
+- **Kantele** (Finland's five-string national instrument), laid out and played the traditional way: across the player, both hands interlaced over the strings, plucked by fingertips catching and lifting the strings. Guided lessons with ghost hands, a rhythm-game timing mode, and free play with recording.
 - **Puukko workbench** (the Finnish belt knife): a virtual smithy and carving table. Close your hand over a tool to pick it up and squeeze to use it. Heat the bar in the forge, hammer the blade out on the anvil, quench it, sharpen it, then carve the birch handle and fit the blade. For the handle, your other hand picks up the blank with a fist and holds it; it follows that hand in 3D and turns as your wrist turns. The knife takes a shaving wherever you draw it across the wood, and how hard you squeeze sets the depth, from a thin curl to a deep bite. The wood is a density field drawn as a smooth surface with real grain, so cuts thinner than a voxel show.
 - **Recordings remember everything**: both robot hands, the tool each one holds, and every change made to the workpiece, frame by frame. Replays rebuild the object's mesh exactly as it was made, and you can scrub through them.
 - **Community**: every creation is a recorded teleoperation demonstration. You can watch the robot replay it, press **Learn this** to turn it into a tutorial (ghost hands follow the creator's real movements), or download it as a training-data JSON file.
@@ -87,6 +87,17 @@ npm run fake-sdk               # pretends to be rkk-hand-solver: two solved hand
 5. Calibrate.
 
 The bridge accepts plain JSON, LZ4-frame, and raw LZ4-block payloads, since we couldn't confirm which one Studio sends. Its log shows which one arrived. Test without hardware: `npm run bridge` + `npm run fake-studio` (add `-- --lz4` to test compression).
+
+## How the kantele is played (and modelled)
+
+The five-string kantele scene follows the traditional technique, from Finnish teaching material, players and makers:
+
+- **Position:** it lies across the player on a table or the lap, strings running left to right, angled a little away across the left knee. The shortest, highest string is nearest the player; the longest, lowest farthest away ([Kardemimmit](https://www.kardemimmit.fi/en/kantele.html), [Wikipedia](https://en.wikipedia.org/wiki/Kantele)). The tuning pegs sit in a diagonal row at the left; the strings run with no bridge or nut to a metal bar (*varras*) in the carved tail (*ponsi*) at the right ([Wikipedia](https://en.wikipedia.org/wiki/Kantele)). The right palm rests by the ponsi ([kantele maker's playing notes](https://michaeljking.com/images/kantele_Tuning.pdf)).
+- **Hands:** both hands play, fingers interlaced, one finger to a string (*sormet sormien lomahan*, [Arja Kastinen / Temps](https://www.temps.fi/en/research/he-played-for-one-day-he-played-for-another-he-played-for-yet-a-third/)). Fingering varies by region and teacher; the app uses a Finnish teaching sheet's: right middle on string 1 (the longest, D), right index on 2 (E), left middle on 3 (F), left index on 4 (G), right thumb on 5 (A).
+- **Plucking:** strings are plucked upwards with the fingertip pad and left to ring; the left hand's fingers damp strings that shouldn't sound (the block-and-strum chord technique).
+- **Size and tuning:** strings about 36 to 53 cm, a body about 65 to 70 cm long; tuned to a pentachord in D major or D minor (ours: D E F G A).
+
+In the app a note sounds only when a robot fingertip catches a string and lets it go (`web/src/crafts/kantele/instrument.ts`); a fingertip resting on a ringing string damps it. Calibrating on the kantele page places your resting hands in playing position.
 
 ## The robot hand
 

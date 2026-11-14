@@ -1,9 +1,6 @@
 // Every craft on the globe, pinned to the region it comes from, and what each
-// one teaches a robot hand: the kantele (fine finger control and timing), the
-// puukko (tool use, heat and force control) and the piano (finger independence
-// and touch).
-//
-// Photos come from Wikimedia Commons, resized, with credits shown in the cards.
+// one teaches a robot hand. Empty for now: add an entry (and its page and
+// route) to put a craft on the map. Photos go in web/public/crafts/ (640px).
 
 export interface CraftImage {
   src: string;
@@ -31,58 +28,6 @@ export interface CraftInfo {
   image: CraftImage;
 }
 
-const commons = (file: string) => `https://commons.wikimedia.org/wiki/File:${file}`;
-
-export const CRAFTS: CraftInfo[] = [
-  {
-    id: 'kantele',
-    name: 'Kantele',
-    localName: 'kantele',
-    country: 'Finland',
-    region: 'Karelia, eastern Finland',
-    lat: 62.7,
-    lng: 30.3,
-    blurb: "Finland's national instrument, a plucked zither at the heart of Karelian runo-song. In the Kalevala, Väinämöinen carves the first one from a giant pike's jawbone.",
-    robotSkills: ['fine finger control', 'timing'],
-    status: 'playable',
-    route: '/kantele',
-    image: { src: '/crafts/kantele.jpg', alt: 'Two five-string kanteles lying on grass', author: 'TheYellowFellow', license: 'CC0', source: commons('Five_string_kanteles.jpg') },
-  },
-  {
-    id: 'puukko',
-    name: 'Puukko',
-    localName: 'puukko',
-    country: 'Finland',
-    region: 'Kauhava, Ostrobothnia, Finland',
-    lat: 63.1,
-    lng: 23.06,
-    blurb: 'The Finnish belt knife: a short single-edged blade with a birch handle. Kauhava has been famous for its puukko smiths for well over a century.',
-    robotSkills: ['tool use', 'heat', 'force control'],
-    status: 'playable',
-    route: '/craft/puukko',
-    image: { src: '/crafts/puukko.jpg', alt: 'A puukko knife and a filleting knife with a leather sheath', author: 'Kuroczynski', license: 'CC BY-SA 4.0', source: commons('%E2%80%9EIMG_5221_Puukko_and_fish_filleting_knife_with_sheath_by_J._Marttiini_(cropped).jpg') },
-  },
-  {
-    id: 'piano',
-    name: 'Piano',
-    localName: 'pianoforte',
-    country: 'Italy',
-    region: 'Florence, Tuscany, Italy',
-    lat: 43.77,
-    lng: 11.25,
-    blurb:
-      "Around 1700, Bartolomeo Cristofori, keeper of instruments to the Medici, built a harpsichord whose strings were struck by hammers, so it could play soft and loud: the gravicembalo col piano e forte. Every piano since descends from it.",
-    robotSkills: ['finger independence', 'touch', 'timing'],
-    status: 'playable',
-    route: '/piano',
-    image: {
-      src: '/crafts/piano.jpg',
-      alt: "The keyboard of Bartolomeo Cristofori's 1720 piano",
-      author: 'The Metropolitan Museum of Art',
-      license: 'CC0',
-      source: commons('Grand_Piano_MET_DP300910.jpg'),
-    },
-  },
-];
+export const CRAFTS: CraftInfo[] = [];
 
 export const craftById = (id: string) => CRAFTS.find((c) => c.id === id);

@@ -98,11 +98,26 @@ export function landmarksToJoints(side: Side, world: Landmark[], image: Normaliz
   }
 }
 
+/** Opens the camera `cameraId` (a MediaDeviceInfo.deviceId), or the default one if that's empty or gone. */
+export async function openCamera(cameraId: string, size = { width: 640, height: 480 }): Promise<MediaStream> {
+  const fallback = () => navigator.mediaDevices.getUserMedia({ video: { ...size, facingMode: 'user' }, audio: false });
+  if (!cameraId) return fallback();
+  try {
+    return await navigator.mediaDevices.getUserMedia({ video: { ...size, deviceId: { exact: cameraId } }, audio: false });
+  } catch (e) {
+    // The chosen camera is unplugged (or its id changed): use the default one rather than nothing.
+    if (e instanceof DOMException && (e.name === 'OverconstrainedError' || e.name === 'NotFoundError')) return fallback();
+    throw e;
+  }
+}
+
 export class WebcamSource implements HandSource {
   readonly kind = 'webcam' as const;
   readonly video = document.createElement('video');
   lastResult: HandLandmarkerResult | null = null;
   swapHands = false;
+  /** Which camera to use (a MediaDeviceInfo.deviceId); empty means the browser's default. */
+  cameraId = '';
   private landmarker: HandLandmarker | null = null;
   private stream: MediaStream | null = null;
   private raf = 0;
@@ -119,7 +134,7 @@ export class WebcamSource implements HandSource {
     this.landmarker = lm;
 
     onStatus({ state: 'starting', message: 'Waiting for camera permission…' });
-    this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+    this.stream = await openCamera(this.cameraId);
     if (!this.running) return this.stop();
     this.video.srcObject = this.stream;
     this.video.muted = true;
