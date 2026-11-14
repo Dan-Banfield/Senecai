@@ -550,15 +550,6 @@ export default function GlobePage() {
     <div className={`globe-page ${hover ? 'card-open' : ''}`} ref={wrapRef}>
       <div className="globe-mount" ref={mountRef} />
 
-      {!here && (
-        <div className="globe-caption">
-          <ul className="globe-legend">
-            <li><span className="lg lg-playable" />playable craft</li>
-            {CRAFTS.some((c) => c.status === 'soon') && <li><span className="lg lg-soon" />craft to come</li>}
-          </ul>
-        </div>
-      )}
-
       {here && (
         <aside className="country-panel">
           <button className="country-back" onClick={() => selectCountry(null)}>
@@ -619,22 +610,6 @@ export default function GlobePage() {
           </div>
         )}
       </div>
-
-      <div className="globe-hint">drag to spin · scroll to zoom · click a country to land · esc to zoom out</div>
-
-      <button className="globe-about-toggle" onClick={() => setAboutOpen((o) => !o)}>
-        {aboutOpen ? 'close' : 'how Senecai works'}
-      </button>
-      {aboutOpen && (
-        <div className="globe-about">
-          <ol>
-            <li><b>Your hands.</b> Rokoko Smartgloves, or a webcam emulator that streams the exact same JSON v3 frames.</li>
-            <li><b>Retargeting.</b> About twenty human finger joints become the six motors of an Inspire-style robot hand, calibrated to you.</li>
-            <li><b>The robot crafts.</b> Plucking a kantele, or forging a puukko and carving its handle, in a simulated workshop, ready to mirror to real hardware.</li>
-            <li><b>Demonstrations.</b> Every creation is a tutorial for people, and training data for robots.</li>
-          </ol>
-        </div>
-      )}
     </div>
   );
 }
