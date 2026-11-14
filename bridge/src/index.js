@@ -6,14 +6,15 @@
 //   Rokoko Studio (macOS/Windows)
 //     Studio "Custom" livestream, JSON v3 ──UDP :14043──> bridge ──WS :14044──> web app
 //
-// Both are always listened for; whichever is streaming feeds the app (if both
-// stream, the first keeps it until silent for 500 ms). SDK frames are converted
-// to the Studio JSON v3 format, so the web app sees one format.
+// Both are always listened for; whichever is streaming hand data feeds the app
+// (if both do, the first keeps it until it has sent no hands for 500 ms; a source
+// without hands, e.g. Studio with no gloves, never takes the feed). SDK frames are
+// converted to the Studio JSON v3 format, so the web app sees one format.
 //
 //   node src/index.js [--spawn-sdk] [--no-sdk] [--no-studio] [--sdk-host 127.0.0.1] [--sdk-port 12277]
 import dgram from 'node:dgram';
 import { WebSocketServer } from 'ws';
-import { createArbiter } from './arbiter.js';
+import { createArbiter, hasHandData } from './arbiter.js';
 import { decodeDatagram } from './decode.js';
 import { createRobotOutput } from './robot-output.js';
 import { connectSdk } from './sdk-client.js';
@@ -31,13 +32,29 @@ const WS_PORT = Number(process.env.SENECAI_WS_PORT ?? 14044);
 const SDK_HOST = opt('sdk-host', process.env.ROKOKO_SDK_HOST ?? '127.0.0.1');
 const SDK_PORT = Number(opt('sdk-port', process.env.ROKOKO_SDK_PORT ?? 12277));
 
+/** @type {{ stop: (timeoutMs?: number) => Promise<void> } | null} */
+let sdkProcess = null;
+let shuttingDown = false;
+
+/** Stops the spawned solver (if any) before exiting, so it never outlives the bridge. */
+async function shutdown(code) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await sdkProcess?.stop();
+  process.exit(code);
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  // A second signal while waiting for the solver forces the exit (spawn-sdk still SIGTERMs it).
+  process.on(sig, () => (shuttingDown ? process.exit(1) : void shutdown(0)));
+}
+
 const robot = createRobotOutput();
 const wss = new WebSocketServer({ port: WS_PORT });
 wss.on('error', (err) => {
   console.error(err.code === 'EADDRINUSE'
     ? `[ws] port ${WS_PORT} already in use — is another bridge running? (set SENECAI_WS_PORT to use another port)`
     : `[ws] server error: ${err.message}`);
-  process.exit(1);
+  void shutdown(1);
 });
 const counts = { studio: 0, sdk: 0 };
 let lastActors = '';
@@ -45,11 +62,11 @@ let lastActors = '';
 // Only one source feeds the app at a time; see arbiter.js.
 const arbiter = createArbiter({
   timeoutMs: 500,
-  onSwitch: (to, from) => console.log(`[bridge] active source: ${to}${from ? ` (was ${from}, silent > 500 ms)` : ''}`),
+  onSwitch: (to, from) => console.log(`[bridge] active source: ${to}${from ? ` (was ${from}, no hand data > 500 ms)` : ''}`),
 });
 
-function broadcast(source, text) {
-  if (!arbiter.offer(source)) return;
+function broadcast(source, frame, text) {
+  if (!arbiter.offer(source, hasHandData(frame))) return;
   for (const client of wss.clients) if (client.readyState === 1) client.send(text);
 }
 
@@ -69,7 +86,7 @@ if (!flag('no-studio')) {
       lastError = '';
       counts.studio++;
       lastActors = result.frame.scene.actors.map((a) => `${a.name}${a.meta?.hasGloves ? ' (gloves)' : ''}`).join(', ');
-      broadcast('studio', result.text);
+      broadcast('studio', result.frame, result.text);
     } catch (e) {
       warn(`dropped datagram: ${e.message}`);
     }
@@ -79,14 +96,15 @@ if (!flag('no-studio')) {
 }
 
 // --- Rokoko Device SDK over TCP ---
-if (flag('spawn-sdk')) spawnSdk();
+// Only once the WebSocket port is ours, so a clashing second bridge doesn't start a solver.
+if (flag('spawn-sdk')) wss.once('listening', () => (sdkProcess = spawnSdk()));
 if (!flag('no-sdk')) {
   connectSdk({
     host: SDK_HOST,
     port: SDK_PORT,
     onFrame: (frame) => {
       counts.sdk++;
-      broadcast('sdk', JSON.stringify(frame));
+      broadcast('sdk', frame, JSON.stringify(frame));
     },
   });
 }

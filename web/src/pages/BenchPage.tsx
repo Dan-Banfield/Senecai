@@ -41,28 +41,61 @@ function snapshot(canvas: HTMLCanvasElement | null) {
   }
 }
 
+/** Search-params updater that sets (or clears) `mode` and keeps everything else, notably `from`. */
+function withMode(mode: string | null) {
+  return (prev: URLSearchParams) => {
+    const next = new URLSearchParams(prev);
+    if (mode) next.set('mode', mode);
+    else next.delete('mode');
+    return next;
+  };
+}
+
 export function BenchPage() {
   const { id = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const mode = params.get('mode') === 'free' ? 'free' : 'learn';
   const fromId = params.get('from');
   const [fromCreation, setFromCreation] = useState<Creation | null>(null);
+  const [fromError, setFromError] = useState(false);
   const [nonce, setNonce] = useState(0);
   const [sharing, setSharing] = useState<{ thumb?: string } | null>(null);
 
+  // The ?from= creation is fetched regardless of mode and kept across Learn/Free switches, so going
+  // back to Learn doesn't refetch. Stale responses (after the id or craft changed) are ignored.
   useEffect(() => {
-    if (!fromId) return setFromCreation(null);
-    void community.get(fromId).then((c) => setFromCreation(c && c.craft === id && isBenchRecording(c.recording) ? c : null));
+    let cancelled = false;
+    setFromCreation(null);
+    setFromError(false);
+    if (!fromId) return;
+    community
+      .get(fromId)
+      .then((c) => {
+        if (!cancelled) setFromCreation(c && c.craft === id && isBenchRecording(c.recording) ? c : null);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        console.error('community get failed', e);
+        setFromError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [fromId, id]);
+
+  // Only Learn mode follows a creation. In Free mode this stays null, so the creation loading (or
+  // changing) never rebuilds the free session and wipes the work.
+  // Craft-gated: right after a route change fromCreation still holds the previous craft's creation for one render.
+  const learnFrom = mode === 'learn' && fromCreation?.craft === id ? fromCreation : null;
 
   const session = useMemo(() => {
     if (!isBenchCraft(id)) return null;
     const def = benchFor(id);
     if (mode === 'free') return new BenchSession(def, { kind: 'free' });
-    const from = fromCreation && isBenchRecording(fromCreation.recording) ? { id: fromCreation.id, title: fromCreation.title, author: fromCreation.author, recording: fromCreation.recording } : undefined;
+    const from = learnFrom && isBenchRecording(learnFrom.recording) ? { id: learnFrom.id, title: learnFrom.title, author: learnFrom.author, recording: learnFrom.recording } : undefined;
     return new BenchSession(def, { kind: 'learn', from });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, mode, fromCreation, nonce]);
+  }, [id, mode, learnFrom, nonce]);
 
   useEffect(() => {
     if (!session) return;
@@ -94,20 +127,21 @@ export function BenchPage() {
           <div className="fi">{def.subtitle}</div>
         </div>
         <div className="tabs">
-          <button className={mode === 'learn' ? 'on' : ''} onClick={() => setParams(fromId ? { from: fromId } : {})}>
+          <button className={mode === 'learn' ? 'on' : ''} onClick={() => setParams(withMode(null))}>
             Learn
           </button>
-          <button className={mode === 'free' ? 'on' : ''} onClick={() => setParams({ mode: 'free' })}>
+          <button className={mode === 'free' ? 'on' : ''} onClick={() => setParams(withMode('free'))}>
             Free work
           </button>
         </div>
         <NoInputCard />
 
-        {fromCreation && mode === 'learn' && (
+        {learnFrom && (
           <div className="learned-from">
-            ★ Learning <Link to={`/community/${fromCreation.id}`}>{fromCreation.title}</Link> by {fromCreation.author}. The ghost hands repeat their real movements.
+            ★ Learning <Link to={`/community/${learnFrom.id}`}>{learnFrom.title}</Link> by {learnFrom.author}. The ghost hands repeat their real movements.
           </div>
         )}
+        {fromError && mode === 'learn' && <div className="learned-from">Couldn't load the creation to learn from. You can still work freely or try again later.</div>}
 
         {!finished && (
           <>
@@ -199,7 +233,7 @@ export function BenchPage() {
       </aside>
 
       <section className="stage">
-        <BenchStage key={`${id}-${mode}-${nonce}-${fromCreation?.id ?? ''}`} session={session} />
+        <BenchStage key={`${id}-${mode}-${nonce}-${learnFrom?.id ?? ''}`} session={session} />
         <div className="stage-overlay">
           {showFeedback && (
             <div className={`feedback ${ui.feedback!.kind}`} style={{ top: 62 }}>
@@ -236,7 +270,7 @@ export function BenchPage() {
             recording: ui.lastRecording,
             score: ui.score ?? undefined,
             thumb: sharing.thumb,
-            learnedFrom: fromCreation ? { id: fromCreation.id, title: fromCreation.title, author: fromCreation.author } : undefined,
+            learnedFrom: learnFrom ? { id: learnFrom.id, title: learnFrom.title, author: learnFrom.author } : undefined,
           }}
           onClose={() => setSharing(null)}
         />

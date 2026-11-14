@@ -56,6 +56,9 @@ export interface Calibration {
 // thumbRotate raw = 3 - (thumbTip↔littleBase distance / palm width): bigger means more opposed.
 const DEFAULT_MIN: Dof6 = [1.1, 5, 15, 15, 15, 15];
 const DEFAULT_MAX: Dof6 = [2.1, 110, 220, 220, 220, 220];
+/** Auto-range never widens past these, so glitch frames can't wreck the range. */
+const AUTO_MIN_FLOOR = DEFAULT_MIN.map((v) => v * 0.5) as Dof6;
+const AUTO_MAX_CEIL = DEFAULT_MAX.map((v) => v * 1.4) as Dof6;
 /** Pointer-style aiming: ~25° of wrist tilt reaches the edge of the workspace. */
 const AIM_GAIN = 2.4;
 
@@ -67,6 +70,15 @@ export function defaultCalibration(center: Vec3 = { x: 0, y: 1.2, z: 0.3 }): Cal
 const toQ = (q: Quat) => new Quaternion(q.x, q.y, q.z, q.w);
 const fromQ = (q: Quaternion): Quat => ({ x: q.x, y: q.y, z: q.z, w: q.w });
 const clamp01 = (v: number) => Math.min(1, Math.max(0, v));
+
+/**
+ * Which raw channels carry a real measurement. thumbRotate needs the thumb tip and
+ * both finger bases; without them `measure` reports 0, which is not a reading.
+ */
+export function validChannels(hand: HumanHand, raw: Dof6): boolean[] {
+  const thumbLandmarks = !!(hand.thumbTip && hand.indexBase && hand.littleBase);
+  return raw.map((r, i) => Number.isFinite(r) && (i !== 0 || thumbLandmarks));
+}
 
 /** Measures the six raw channels for one hand. */
 export function measure(hand: HumanHand, cal: SideCalibration): Dof6 {
@@ -128,15 +140,24 @@ export class Retargeter {
     const cal = this.calibration[hand.side];
     if (!cal.neutral && this.calibration.autoNeutral) cal.neutral = fromQ(hand.wristRotation);
     const raw = measure(hand, cal);
+    const valid = validChannels(hand, raw);
 
     if (this.calibration.autoRange) {
       for (let i = 0; i < 6; i++) {
+        if (!valid[i]) continue;
         // Expand slowly and within sane bounds so a single glitchy frame can't wreck the range.
-        if (raw[i] < cal.min[i]) cal.min[i] += (raw[i] - cal.min[i]) * 0.1;
-        if (raw[i] > cal.max[i]) cal.max[i] += (Math.min(raw[i], DEFAULT_MAX[i] * 1.4) - cal.max[i]) * 0.1;
+        // Only ever widen: a calibrated range already past a bound is left alone.
+        const lo = Math.max(raw[i], AUTO_MIN_FLOOR[i]);
+        if (lo < cal.min[i]) cal.min[i] += (lo - cal.min[i]) * 0.1;
+        const hi = Math.min(raw[i], AUTO_MAX_CEIL[i]);
+        if (hi > cal.max[i]) cal.max[i] += (hi - cal.max[i]) * 0.1;
       }
     }
-    const target = raw.map((r, i) => clamp01((r - cal.min[i]) / Math.max(1e-6, cal.max[i] - cal.min[i]))) as Dof6;
+    // A channel with no reading holds its last value instead of snapping open.
+    const prev = this.smooth[hand.side]?.dof;
+    const target = raw.map((r, i) =>
+      valid[i] ? clamp01((r - cal.min[i]) / Math.max(1e-6, cal.max[i] - cal.min[i])) : (prev?.[i] ?? 0),
+    ) as Dof6;
 
     const c = cal.center ?? { x: 0, y: 1.2, z: 0.3 };
     const s = this.calibration.positionScale;

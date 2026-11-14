@@ -373,4 +373,104 @@ describe('the bench session', () => {
     new BenchPlayer(rec, replay).advance(rec.durationMs + 1);
     expect(replay.state.yaw.handle).toBe(s.bench.state.yaw.handle);
   });
+
+  const key = (type: string, k: string) => window.dispatchEvent(Object.assign(new Event(type), { key: k }));
+  /** Every op the session emits, in order. */
+  const tapOps = (s: BenchSession) => {
+    const ops: Op[] = [];
+    const emit = s.emit;
+    s.emit = (op) => {
+      ops.push(op);
+      emit(op);
+    };
+    return ops;
+  };
+  const DTS = [5, 16, 3, 7, 11, 2, 9, 4, 13, 6, 5, 8];
+  /** The angle a turn at 1.6 rad/s reaches over these ticks, summed the way the session does. */
+  const turnTo = (from: number, dts: number[], sign: 1 | -1) => r3(dts.reduce((a, d) => a + sign * 1.6 * Math.min(0.1, d / 1000), from));
+
+  it('rolls a held piece with Q / E only through ops: live always matches replaying them', () => {
+    const def = benchFor('puukko');
+    const s = new BenchSession(def, { kind: 'free' });
+    s.activate();
+    const ops = tapOps(s);
+    s.emit({ w: '$', k: 'place', wp: 'handle', at: 'held:left' });
+    input.commands = { right: hand('right', 0), left: hand('left', 0.9) };
+    const replay = new Bench(def);
+    let seen = 0;
+    const check = () => {
+      for (const op of ops.slice(seen)) replay.apply(op);
+      seen = ops.length;
+      expect(s.bench.state.roll.handle ?? 0).toBe(replay.state.roll.handle ?? 0);
+    };
+    check();
+    try {
+      key('keydown', 'q');
+      for (const d of DTS) {
+        ticks(s, 1, d);
+        check();
+      }
+      expect(ops.filter((o) => o.k === 'roll').length).toBeGreaterThan(1);
+      key('keyup', 'q');
+      ticks(s, 1);
+      check();
+      expect(s.bench.state.roll.handle).toBe(turnTo(0, DTS, -1));
+      // Opening the hand sets it down with the roll reset; a fresh roll starts from there.
+      input.commands = { right: hand('right', 0), left: hand('left', 0.1) };
+      ticks(s, 1);
+      check();
+      expect(s.bench.state.roll.handle).toBe(0);
+    } finally {
+      key('keyup', 'q');
+    }
+  });
+
+  it('finishing mid-turn records the exact final roll', () => {
+    const def = benchFor('puukko');
+    const s = new BenchSession(def, { kind: 'free' });
+    s.activate();
+    s.emit({ w: '$', k: 'place', wp: 'handle', at: 'held:left' });
+    input.commands = { right: hand('right', 0), left: hand('left', 0.9) };
+    try {
+      key('keydown', 'e');
+      for (const d of DTS) ticks(s, 1, d);
+      s.finish();
+    } finally {
+      key('keyup', 'e');
+    }
+    const want = turnTo(0, DTS, 1);
+    expect(s.bench.state.roll.handle).toBe(want);
+    const rec = useBenchUi.getState().lastRecording!;
+    const replay = new Bench(def);
+    new BenchPlayer(rec, replay).advance(rec.durationMs + 1);
+    expect(replay.state.roll.handle).toBe(want);
+  });
+
+  it('finishing mid-turn records the exact final yaw with the generic turn', () => {
+    const def = { ...benchFor('puukko'), turn: undefined, turnTarget: () => 'handle' };
+    const s = new BenchSession(def, { kind: 'free' });
+    s.activate();
+    const ops = tapOps(s);
+    input.commands = { right: hand('right', 0) };
+    const before = s.bench.state.yaw.handle ?? 0;
+    const replay = new Bench(def);
+    try {
+      key('keydown', 'e');
+      for (const d of DTS) {
+        ticks(s, 1, d);
+        // Live never runs ahead of the op stream.
+        const fresh = new Bench(def);
+        for (const op of ops) fresh.apply(op);
+        expect(s.bench.state.yaw.handle).toBe(fresh.state.yaw.handle);
+      }
+      s.finish();
+    } finally {
+      key('keyup', 'e');
+    }
+    const want = turnTo(before, DTS, 1);
+    expect(s.bench.state.yaw.handle).toBe(want);
+    const rec = useBenchUi.getState().lastRecording!;
+    new BenchPlayer(rec, replay).advance(rec.durationMs + 1);
+    expect(replay.state.yaw.handle).toBe(want);
+  });
 });

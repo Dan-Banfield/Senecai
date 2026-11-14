@@ -185,10 +185,13 @@ setInterval(() => {
 // Reconnects with exponential backoff, and reopens when bridgeUrl changes.
 const ROBOT_BACKOFF_MIN = 500;
 const ROBOT_BACKOFF_MAX = 10_000;
+/** A socket still CONNECTING after this long is abandoned and retried (some stalls never fire onerror/onclose). */
+const ROBOT_CONNECT_TIMEOUT = 5_000;
 let robotWs: WebSocket | null = null;
 let robotUrl = '';
 let robotBackoff = ROBOT_BACKOFF_MIN;
 let robotRetryAt = 0;
+let robotConnectStartedAt = 0;
 
 function resetRobotLink() {
   robotWs?.close();
@@ -200,7 +203,8 @@ function resetRobotLink() {
 
 function connectRobot(url: string) {
   robotUrl = url;
-  robotRetryAt = performance.now() + robotBackoff;
+  robotConnectStartedAt = performance.now();
+  robotRetryAt = robotConnectStartedAt + robotBackoff;
   robotBackoff = Math.min(robotBackoff * 2, ROBOT_BACKOFF_MAX);
   try {
     const ws = new WebSocket(url);
@@ -222,8 +226,14 @@ setInterval(() => {
     return;
   }
   if (robotUrl && settings.bridgeUrl !== robotUrl) resetRobotLink();
+  const now = performance.now();
+  if (robotWs?.readyState === WebSocket.CONNECTING && now - robotConnectStartedAt > ROBOT_CONNECT_TIMEOUT) {
+    // Stuck handshake: drop it; the backoff already set by connectRobot schedules the retry.
+    robotWs.close();
+    robotWs = null;
+  }
   if (!robotWs || robotWs.readyState === WebSocket.CLOSED) {
-    if (performance.now() >= robotRetryAt) connectRobot(settings.bridgeUrl);
+    if (now >= robotRetryAt) connectRobot(settings.bridgeUrl);
     return;
   }
   if (robotWs.readyState !== WebSocket.OPEN) return;

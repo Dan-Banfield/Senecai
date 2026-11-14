@@ -69,6 +69,8 @@ export class KanteleSession {
   private detector = new PluckDetector();
   private recorder: Recorder;
   private waitingIndex = 0;
+  /** Whether the previous live frame had a hand command; a gap resets the pluck detector. */
+  private hadCmd = false;
 
   constructor(public mode: KanteleMode) {
     const kind = usePipeline.getState().kind ?? 'none';
@@ -134,10 +136,14 @@ export class KanteleSession {
       const pos = HAND_BASE.clone().add(cmd.position.clone().multiplyScalar(0.12));
       const rot = new THREE.Quaternion().slerp(cmd.rotation, 0.3);
       this.livePose = { dof: cmd.dof, position: pos, rotation: rot };
+      // The hand just (re)appeared: fingers already curled must not fire as rising edges.
+      if (!this.hadCmd) this.detector.reset(cmd.dof);
+      this.hadCmd = true;
       for (const p of this.detector.update(cmd.dof, dtMs)) this.onPluck(p.string, p.velocity);
       this.recorder.frame([{ side: cmd.side, pose: this.livePose }]);
     } else {
       this.livePose = undefined;
+      this.hadCmd = false;
     }
 
     if (this.mode.kind === 'lesson' && (ui.phase === 'countdown' || ui.phase === 'playing')) this.tickLesson(dtMs, this.mode.lesson, ui.phase);
@@ -216,7 +222,13 @@ export class KanteleSession {
       this.recorder.event({ type: 'pluck', string, velocity: Math.round(velocity * 100) / 100 });
       useKanteleUi.setState({ recordedPlucks: this.recorder.eventCount });
     }
-    if (this.mode.kind !== 'lesson' || useKanteleUi.getState().phase !== 'playing') return;
+    if (this.mode.kind !== 'lesson') return;
+    // Judge while playing, and also at the end of the countdown once the first notes (t = 0) are
+    // within the judging window. songTime is the lesson clock (negative during the countdown), the
+    // same base as note times; earlier countdown plucks just sound. The recorder above uses its own
+    // wall clock from Record, so its timestamps are never negative.
+    const phase = useKanteleUi.getState().phase;
+    if (phase !== 'playing' && !(phase === 'countdown' && this.songTime >= -GOOD_MS)) return;
 
     if (this.mode.lesson.wait) {
       const next = this.notes[this.waitingIndex];

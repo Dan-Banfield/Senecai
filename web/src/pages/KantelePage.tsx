@@ -10,6 +10,16 @@ import { ShareDialog } from '../ui/ShareDialog';
 import { WebcamPreview } from '../ui/WebcamPreview';
 import { NoInputCard, NoHandHint } from './common';
 
+/** Search-params updater that sets (or clears) `mode` and keeps everything else, notably `from`. */
+function withMode(mode: string | null) {
+  return (prev: URLSearchParams) => {
+    const next = new URLSearchParams(prev);
+    if (mode) next.set('mode', mode);
+    else next.delete('mode');
+    return next;
+  };
+}
+
 export function KantelePage() {
   const [params, setParams] = useSearchParams();
   const mode = params.get('mode') === 'play' ? 'play' : 'learn';
@@ -18,14 +28,29 @@ export function KantelePage() {
   const [lessonId, setLessonId] = useState(LESSONS[0].id);
   const [sharing, setSharing] = useState(false);
 
+  const [fromError, setFromError] = useState(false);
+
+  // Fetched regardless of mode and kept across Learn/Free play switches. Stale responses are ignored.
   useEffect(() => {
-    if (!fromId) return setFromCreation(null);
-    void community.get(fromId).then((c) => {
-      if (c?.craft === 'kantele' && c.recording.version === 1) {
+    let cancelled = false;
+    setFromCreation(null);
+    setFromError(false);
+    if (!fromId) return;
+    community
+      .get(fromId)
+      .then((c) => {
+        if (cancelled || !(c?.craft === 'kantele' && c.recording.version === 1)) return;
         setFromCreation(c);
         setLessonId(`creation-${c.id}`);
-      }
-    });
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        console.error('community get failed', e);
+        setFromError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [fromId]);
 
   const lessons: Lesson[] = useMemo(
@@ -34,7 +59,9 @@ export function KantelePage() {
   );
   const lesson = lessons.find((l) => l.id === lessonId) ?? lessons[0];
 
-  const session = useMemo(() => new KanteleSession(mode === 'play' ? { kind: 'free' } : { kind: 'lesson', lesson }), [mode, lesson]);
+  // Free play ignores the lesson, so the creation loading late can't rebuild (and reset) a free session.
+  const activeLesson = mode === 'learn' ? lesson : null;
+  const session = useMemo(() => new KanteleSession(activeLesson ? { kind: 'lesson', lesson: activeLesson } : { kind: 'free' }), [activeLesson]);
   useEffect(() => {
     session.activate();
     return () => session.dispose();
@@ -55,13 +82,14 @@ export function KantelePage() {
           <div className="fi">the five-string kantele · viisikielinen kantele</div>
         </div>
         <div className="tabs">
-          <button className={mode === 'learn' ? 'on' : ''} onClick={() => setParams(fromId ? { from: fromId } : {})}>Learn</button>
-          <button className={mode === 'play' ? 'on' : ''} onClick={() => setParams({ mode: 'play' })}>Free play</button>
+          <button className={mode === 'learn' ? 'on' : ''} onClick={() => setParams(withMode(null))}>Learn</button>
+          <button className={mode === 'play' ? 'on' : ''} onClick={() => setParams(withMode('play'))}>Free play</button>
         </div>
         <NoInputCard />
 
         {mode === 'learn' ? (
           <>
+            {fromError && <div className="learned-from">Couldn't load the community piece. The built-in lessons are still here.</div>}
             <div className="lesson-list">
               {lessons.map((l) => (
                 <button key={l.id} className={`lesson-item ${l.id === lesson.id ? 'on' : ''}`} onClick={() => setLessonId(l.id)}>
@@ -146,7 +174,7 @@ export function KantelePage() {
       </section>
       {sharing && ui.lastRecording && (
         <ShareDialog
-          draft={{ craft: 'kantele', recording: ui.lastRecording, learnedFrom: fromCreation ? { id: fromCreation.id, title: fromCreation.title, author: fromCreation.author } : undefined }}
+          draft={{ craft: 'kantele', recording: ui.lastRecording, learnedFrom: mode === 'learn' && fromCreation ? { id: fromCreation.id, title: fromCreation.title, author: fromCreation.author } : undefined }}
           onClose={() => setSharing(false)}
         />
       )}

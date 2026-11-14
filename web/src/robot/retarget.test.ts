@@ -55,6 +55,67 @@ describe('Rokoko frame -> robot command', () => {
     expect(open.position.length()).toBeLessThan(1e-6);
   });
 
+  it('auto-range ignores missing thumb landmarks and bounds min against noise', () => {
+    const cal = defaultCalibration();
+    captureOpen(cal, hands(pose(0, 0)).right!);
+    captureFist(cal, hands(pose(1, 1)).right!);
+    const calMin = cal.right.min[0];
+    const r = new Retargeter(cal);
+    let t = 0;
+    r.update(hands(pose(0.5, 0.5)), t);
+    const held = r.update(hands(pose(0.5, 0.5)), (t += 1)).right!.dof[0];
+
+    // ~20 frames without the thumb tip: thumbRotate measures 0 but is not a reading.
+    for (let i = 0; i < 20; i++) {
+      const f = buildFrame([pose(0.5, 0.5)], 0);
+      delete f.scene.actors[0].body.rightThumbTip;
+      const h = parseFrame(f);
+      expect(h.right?.thumbTip).toBeUndefined();
+      const cmd = r.update(h, (t += 1 / 30)).right!;
+      expect(cmd.raw[0]).toBe(0);
+      expect(cmd.dof[0]).toBeCloseTo(held, 6); // holds instead of snapping open
+    }
+    expect(cal.right.min[0]).toBe(calMin);
+
+    // Noisy frames with a valid but absurdly low reading can't drag min past its floor.
+    for (let i = 0; i < 200; i++) {
+      const h = hands(pose(0.5, 0.5));
+      h.right!.thumbTip = h.right!.littleBase!.clone().add(h.right!.indexBase!.clone().sub(h.right!.littleBase!).multiplyScalar(10));
+      r.update(h, (t += 1 / 30));
+    }
+    expect(cal.right.min[0]).toBeGreaterThanOrEqual(0.55 - 1e-9);
+    expect(cal.right.min[0]).toBeLessThan(calMin);
+
+    // Normal values afterwards still map linearly through the (bounded) range.
+    r.update(hands(pose(1, 1)), (t += 10));
+    expect(r.update(hands(pose(1, 1)), (t += 10)).right!.dof[0]).toBeGreaterThan(0.98);
+    r.update(hands(pose(0, 0)), (t += 10));
+    const open = r.update(hands(pose(0, 0)), (t += 10)).right!;
+    const { min, max } = cal.right;
+    expect(open.dof[0]).toBeCloseTo((open.raw[0] - min[0]) / (max[0] - min[0]), 4);
+    expect(open.dof[0]).toBeLessThan(0.4);
+    expect(Math.max(...open.dof.slice(1))).toBeLessThan(0.02);
+  });
+
+  it('auto-range with missing thumb landmarks keeps the calibrated mapping exact', () => {
+    const cal = defaultCalibration();
+    captureOpen(cal, hands(pose(0, 0)).right!);
+    captureFist(cal, hands(pose(1, 1)).right!);
+    const before = { min: [...cal.right.min], max: [...cal.right.max] };
+    const r = new Retargeter(cal);
+    for (let i = 0; i < 20; i++) {
+      const f = buildFrame([pose(0, 0)], 0);
+      delete f.scene.actors[0].body.rightThumbTip;
+      r.update(parseFrame(f), i / 30);
+    }
+    expect(cal.right.min).toEqual(before.min);
+    expect(cal.right.max).toEqual(before.max);
+    const r2 = new Retargeter(cal);
+    expect(r2.update(hands(pose(0, 0)), 0).right!.dof[0]).toBeLessThan(0.02);
+    r2.update(hands(pose(1, 1)), 10);
+    expect(r2.update(hands(pose(1, 1)), 20).right!.dof[0]).toBeGreaterThan(0.98);
+  });
+
   it('exports Inspire angles (1000 = open)', () => {
     expect(toInspireAngles([0, 0, 0, 0, 0, 0])).toEqual([1000, 1000, 1000, 1000, 1000, 1000]);
     expect(toInspireAngles([1, 0.5, 0.25, 0, 0, 1])).toEqual([0, 1000, 1000, 750, 500, 0]);

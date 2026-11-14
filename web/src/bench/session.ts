@@ -68,6 +68,8 @@ export const useBenchUi = create<BenchUi>(() => ({
 }));
 
 const CARVING_TOOLS = new Set(['knife']);
+/** Smallest yaw / roll change (radians) worth an op while turning. */
+const TURN_STEP = 0.01;
 
 export interface HandView {
   side: Side;
@@ -130,9 +132,12 @@ export class BenchSession {
   /** A turn was applied recently and its remainder has not been flushed yet. */
   private turnPending = false;
   private lastOffX: number | null = null;
-  /** Last yaw / roll recorded per workpiece (by an op, or the start): what replay shows. */
-  private yawSent: Record<string, number>;
-  private rollSent: Record<string, number>;
+  /**
+   * Turning not yet sent, per axis and workpiece. The yaw / roll only ever change
+   * through ops (so live never shows an angle replay doesn't have); `acc` is where
+   * the turn has got to, `sent` the value last emitted.
+   */
+  private turnAcc = new Map<string, { k: 'yaw' | 'roll'; wp: string; sent: number; acc: number }>();
   /** Off-hand pose when it picked the piece up: the piece follows the hand relative to this. */
   private holdAnchor: { p: THREE.Vector3; q: THREE.Quaternion } | null = null;
   private offLostAt: number | null = null;
@@ -150,8 +155,6 @@ export class BenchSession {
     readonly mode: BenchMode,
   ) {
     this.bench = new Bench(def);
-    this.yawSent = { ...def.start.yaw };
-    this.rollSent = { ...def.start.roll };
     this.recorder = new BenchRecorder(def.id, usePipeline.getState().kind ?? 'none');
     if (mode.kind === 'replay') {
       this.player = new BenchPlayer(mode.recording, this.bench);
@@ -219,7 +222,6 @@ export class BenchSession {
 
   emit = (op: Op) => {
     this.bench.apply(op);
-    if (op.w === '$' && (op.k === 'yaw' || op.k === 'roll')) (op.k === 'yaw' ? this.yawSent : this.rollSent)[op.wp as string] = op.v as number;
     this.pending.push(op);
     this.effectFor(op);
   };
@@ -395,40 +397,49 @@ export class BenchSession {
     if (this.def.turn) return this.def.turn(ctx, delta);
     const wp = this.def.turnTarget?.(this.bench) ?? [...this.bench.workpieces.keys()][0];
     if (!wp) return;
-    const s = this.bench.state;
-    const v = (s.yaw[wp] ?? 0) + delta;
-    s.yaw[wp] = v; // turn smoothly; ops are sent in coarser steps below
-    this.bench.version++;
-    if (Math.abs(v - (this.yawSent[wp] ?? 0)) > 0.02) {
-      this.emit({ w: '$', k: 'yaw', wp, v: r3(v) });
-    }
+    this.turnAxis('yaw', wp, delta);
   }
 
   /** Roll a held piece about its long axis, as if turning it in the fingers. */
   private rollHeld(wp: string, delta: number) {
-    const s = this.bench.state;
-    const v = (s.roll[wp] ?? 0) + delta;
-    s.roll[wp] = v;
-    this.bench.version++;
-    if (Math.abs(v - (this.rollSent[wp] ?? 0)) > 0.02) {
-      this.emit({ w: '$', k: 'roll', wp, v: r3(v) });
+    this.turnAxis('roll', wp, delta);
+  }
+
+  /**
+   * Turn a workpiece's yaw or roll by `delta`, only ever through ops: small turns
+   * build up until the rounded angle has moved by more than TURN_STEP, and a turn
+   * of 0 (sent when turning stops) flushes whatever is left.
+   */
+  private turnAxis(k: 'yaw' | 'roll', wp: string, delta: number) {
+    const cur = this.bench.state[k][wp] ?? 0;
+    const key = `${k}:${wp}`;
+    let m = this.turnAcc.get(key);
+    // Re-sync if another op set the angle since (V swaps ends, setting the piece down).
+    if (!m || m.sent !== cur) this.turnAcc.set(key, (m = { k, wp, sent: cur, acc: cur }));
+    m.acc += delta;
+    const v = r3(m.acc);
+    if (v !== cur && (delta === 0 || Math.abs(v - cur) > TURN_STEP)) {
+      m.sent = v;
+      this.emit({ w: '$', k, wp, v });
     }
   }
 
   /**
    * Turning stopped: send what is left of it, so the recorded ops end on the
-   * exact angle shown live and replay doesn't drift from the cuts.
+   * exact angle the turn reached and replay doesn't drift from the cuts.
    */
   private settleTurn(ctx: InteractCtx) {
-    const s = this.bench.state;
-    for (const [axis, sent, k] of [
-      [s.yaw, this.yawSent, 'yaw'],
-      [s.roll, this.rollSent, 'roll'],
-    ] as const) {
-      for (const [wp, v] of Object.entries(axis)) if (v !== (sent[wp] ?? 0)) this.emit({ w: '$', k, wp, v: r3(v) });
-    }
+    for (const m of [...this.turnAcc.values()]) this.turnAxis(m.k, m.wp, 0);
     // A craft's own turn flushes its remainder on a turn of 0.
     this.def.turn?.(ctx, 0);
+  }
+
+  /** Flush a turn still in progress (live sessions only; replay never emits). */
+  private flushTurn() {
+    if (this.mode.kind === 'replay' || !this.turnPending) return;
+    this.turnPending = false;
+    const offSide = otherSide(this.primary);
+    this.settleTurn(this.ctx(offSide, this.aim ?? tableAim(), secondaryCommand(), 0));
   }
 
   /** The working hand moved to the other side: carry the tool across and forget the old hand's state. */
@@ -648,8 +659,7 @@ export class BenchSession {
       else if (Math.abs(p - ui.stageProgress) > 0.005) useBenchUi.setState({ stageProgress: p });
     }
 
-    const hands = (['left', 'right'] as Side[]).flatMap((s) => (this.hands[s].pose ? [{ side: s, pose: this.hands[s].pose!, tool: this.hands[s].tool }] : []));
-    this.recorder.frame(hands, this.pending);
+    this.recorder.frame(this.handsNow(), this.pending);
     this.pending = [];
 
     this.uiTimer -= dtMs;
@@ -668,6 +678,10 @@ export class BenchSession {
         holding: held,
       });
     }
+  }
+
+  private handsNow() {
+    return (['left', 'right'] as Side[]).flatMap((s) => (this.hands[s].pose ? [{ side: s, pose: this.hands[s].pose!, tool: this.hands[s].tool }] : []));
   }
 
   private posePrimary(side: Side, cmd: RobotHandCommand, aim: Aim, dt: number): RobotPose {
@@ -736,6 +750,12 @@ export class BenchSession {
   }
 
   finish() {
+    // Finishing mid-turn: record the rest of the turn so replay ends on the same angle.
+    this.flushTurn();
+    if (this.pending.length) {
+      this.recorder.frame(this.handsNow(), this.pending);
+      this.pending = [];
+    }
     const rec = this.recorder.stop();
     // The input may have started after this session did; record what was actually used.
     rec.source = usePipeline.getState().kind ?? rec.source;

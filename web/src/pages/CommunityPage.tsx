@@ -20,8 +20,12 @@ export function LikeButton({ creation, onChange }: { creation: Creation; onChang
       onClick={async (e) => {
         e.preventDefault();
         e.stopPropagation();
-        const c = await community.like(creation.id);
-        if (c) onChange(c);
+        try {
+          const c = await community.like(creation.id);
+          if (c) onChange(c);
+        } catch (err) {
+          console.warn('like failed', err);
+        }
       }}
     >
       {creation.liked ? '♥' : '♡'} {creation.likes}
@@ -32,10 +36,25 @@ export function LikeButton({ creation, onChange }: { creation: Creation; onChang
 export function CommunityPage() {
   const [filter, setFilter] = useState<CraftId | undefined>();
   const [items, setItems] = useState<Creation[] | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     setItems(null);
-    void community.list({ craft: filter }).then(setItems);
+    setError(false);
+    community
+      .list({ craft: filter })
+      .then((list) => {
+        if (!cancelled) setItems(list);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        console.error('community list failed', e);
+        setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [filter]);
 
   return (
@@ -57,8 +76,12 @@ export function CommunityPage() {
           </select>
         </label>
       </div>
-      {!items ? (
+      {error ? (
+        <div className="empty">Couldn't load the community right now. Try again in a moment.</div>
+      ) : !items ? (
         <div className="empty">Loading…</div>
+      ) : items.length === 0 ? (
+        <div className="empty">No creations yet.</div>
       ) : (
         <div className="grid">
           {items.map((c) => (

@@ -40,6 +40,10 @@ function BenchReplay({ recording }: { recording: BenchRecording }) {
   }, [session]);
   const ui = useBenchUi();
   const [speed, setSpeed] = useState(session.replaySpeed);
+  // Keep the highlighted speed authoritative if the session is rebuilt under the same creation.
+  useEffect(() => {
+    session.replaySpeed = speed;
+  }, [session, speed]);
   const stage = session.def.stages[ui.stage];
   return (
     <section className="stage">
@@ -82,10 +86,31 @@ function BenchReplay({ recording }: { recording: BenchRecording }) {
 export function CreationPage() {
   const { id } = useParams();
   const [c, setC] = useState<Creation | null | undefined>(undefined);
+  const [error, setError] = useState(false);
   useEffect(() => {
-    void community.get(id!).then((x) => setC(x ?? null));
+    let cancelled = false;
+    setC(undefined);
+    setError(false);
+    if (!id) {
+      setC(null);
+      return;
+    }
+    community
+      .get(id)
+      .then((x) => {
+        if (!cancelled) setC(x ?? null);
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        console.error('community get failed', e);
+        setError(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
+  if (error) return <div className="empty">Couldn't load this creation. <Link to="/community">Back to community</Link></div>;
   if (c === undefined) return <div className="empty">Loading…</div>;
   if (c === null) return <div className="empty">Creation not found. <Link to="/community">Back to community</Link></div>;
 
@@ -127,7 +152,8 @@ export function CreationPage() {
           <Link className="btn primary" to={learnUrl}>
             Learn this
           </Link>
-          <LikeButton creation={c} onChange={setC} />
+          {/* Keep the recording reference so a like doesn't rebuild (and restart) the replay session. */}
+          <LikeButton creation={c} onChange={(n) => setC((prev) => (prev && prev.id === n.id ? { ...n, recording: prev.recording } : n))} />
         </div>
         <div className="card">
           <h3>Demonstration data</h3>
@@ -148,7 +174,7 @@ export function CreationPage() {
           </button>
         </div>
       </aside>
-      {bench ? <BenchReplay recording={bench} /> : rec.version === 1 ? <KanteleReplay recording={rec} /> : null}
+      {bench ? <BenchReplay key={c.id} recording={bench} /> : rec.version === 1 ? <KanteleReplay key={c.id} recording={rec} /> : null}
     </div>
   );
 }

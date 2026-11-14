@@ -50,12 +50,19 @@ export function checkSerialAccess(log = console.log) {
   return ok;
 }
 
+/**
+ * Starts rkk-hand-solver unless one is already running.
+ * `stop()` sends SIGTERM (so the solver can shut down the driver it started) and
+ * resolves once it has exited, or after `timeoutMs`. The caller owns signal handling;
+ * as a last resort the child is also SIGTERMed when this process exits.
+ * @returns {{ stop: (timeoutMs?: number) => Promise<void> }}
+ */
 export function spawnSdk({ log = console.log } = {}) {
   let child = null;
   checkSerialAccess(log);
   if (isRunning('rkk-hand-solver')) {
     log('[spawn] rkk-hand-solver is already running, using it');
-    return { stop() {} };
+    return { stop: async () => {} };
   }
   const args = ['--emit-openxr'];
   if (isRunning('rokoko-sdk')) {
@@ -82,9 +89,16 @@ export function spawnSdk({ log = console.log } = {}) {
   child.on('error', (e) => log(`[spawn] could not start rkk-hand-solver: ${e.message}. Is the Rokoko Device SDK installed? Check with "rokoko doctor" (see README).`));
   child.on('exit', (code, signal) => log(`[spawn] rkk-hand-solver exited (${signal ?? code})${code ? '. If it says "Address already in use", another rokoko-sdk is running: pkill -x rokoko-sdk and try again.' : ''}`));
 
-  // SIGTERM lets the solver shut down the driver it started.
-  const stop = () => child?.exitCode === null && child.kill('SIGTERM');
-  process.on('exit', stop);
-  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => (stop(), process.exit(0)));
+  const alive = () => child.pid !== undefined && child.exitCode === null && child.signalCode === null;
+  // Synchronous safety net: covers process.exit() and crashes that skip stop().
+  process.on('exit', () => alive() && child.kill('SIGTERM'));
+
+  const stop = (timeoutMs = 2000) =>
+    new Promise((resolve) => {
+      if (!alive()) return resolve();
+      const timer = setTimeout(resolve, timeoutMs);
+      child.once('exit', () => (clearTimeout(timer), resolve()));
+      child.kill('SIGTERM');
+    });
   return { stop };
 }

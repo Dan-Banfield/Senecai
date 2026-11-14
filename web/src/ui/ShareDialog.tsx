@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { community, type NewCreation } from '../community/api';
+import { community, CommunityStorageError, type NewCreation } from '../community/api';
 import { DEFAULT_PLACE, PLACES, placeByName, type GeoPoint } from '../community/places';
 
 const NAME_KEY = 'senecai.author';
@@ -12,6 +12,7 @@ export function ShareDialog({ draft, onClose }: { draft: Omit<NewCreation, 'titl
   const [author, setAuthor] = useState(() => localStorage.getItem(NAME_KEY) ?? '');
   const [description, setDescription] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
   const [placeName, setPlaceName] = useState(() => {
     const saved = localStorage.getItem(PLACE_KEY);
     return saved && placeByName(saved) ? saved : DEFAULT_PLACE.place;
@@ -35,11 +36,24 @@ export function ShareDialog({ draft, onClose }: { draft: Omit<NewCreation, 'titl
   const location = placeName === MY_LOCATION && mine ? mine : (placeByName(placeName) ?? DEFAULT_PLACE);
 
   const submit = async () => {
+    if (busy) return;
     setBusy(true);
-    localStorage.setItem(NAME_KEY, author);
-    if (placeName !== MY_LOCATION) localStorage.setItem(PLACE_KEY, placeName);
-    const c = await community.create({ ...draft, title: title || 'Untitled', author: author || 'Anonymous', description, location });
-    navigate(`/community/${c.id}`);
+    setError('');
+    try {
+      try {
+        localStorage.setItem(NAME_KEY, author);
+        if (placeName !== MY_LOCATION) localStorage.setItem(PLACE_KEY, placeName);
+      } catch {
+        // Remembering the name and place is a convenience; sharing shouldn't fail because of it.
+      }
+      const c = await community.create({ ...draft, title: title || 'Untitled', author: author || 'Anonymous', description, location });
+      navigate(`/community/${c.id}`);
+    } catch (e) {
+      console.error('share failed', e);
+      setError(e instanceof CommunityStorageError ? e.message : 'Sharing failed. Please try again.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -77,6 +91,11 @@ export function ShareDialog({ draft, onClose }: { draft: Omit<NewCreation, 'titl
           Notes for learners
           <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Tips, inspiration, the story behind it…" />
         </label>
+        {error && (
+          <p role="alert" style={{ margin: 0, color: 'var(--warn)' }}>
+            {error}
+          </p>
+        )}
         <div className="row" style={{ justifyContent: 'flex-end' }}>
           <button className="btn ghost" onClick={onClose}>Cancel</button>
           <button className="btn primary" disabled={busy} onClick={submit}>{busy ? 'Sharing…' : 'Share'}</button>

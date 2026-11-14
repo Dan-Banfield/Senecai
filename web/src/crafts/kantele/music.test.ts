@@ -74,4 +74,27 @@ describe('PluckDetector', () => {
     expect(det.update(dofFor(2, 0.3), 16)).toHaveLength(0);
     expect(det.update(dofFor(2, 0.6), 16)).toEqual([expect.objectContaining({ string: 2 })]);
   });
+
+  it('reset() with curled fingers suppresses plucks until they extend below off and curl again', () => {
+    const det = new PluckDetector(0.55, 0.38);
+    // Hand lost, then returns with index curled, middle half-curled (between off and on), ring open.
+    const back = [0, 0, 0.8, 0.45, 0.1, 0];
+    det.reset(back);
+    expect(det.update(back, 16)).toHaveLength(0);
+    // Middle rising past on without first extending must not pluck.
+    expect(det.update([0, 0, 0.8, 0.7, 0.1, 0], 16)).toHaveLength(0);
+    // Ring was open at reset, so it is armed and plucks normally.
+    expect(det.update([0, 0, 0.8, 0.7, 0.7, 0], 16)).toEqual([expect.objectContaining({ string: 3 })]);
+    // Extend index and middle below off, then curl again: now they pluck.
+    expect(det.update([0, 0, 0.2, 0.2, 0.7, 0], 16)).toHaveLength(0);
+    const again = det.update([0, 0, 0.8, 0.8, 0.7, 0], 16);
+    expect(again.map((p) => p.string).sort()).toEqual([1, 2]);
+  });
+
+  it('reset() without a pose arms every string', () => {
+    const det = new PluckDetector(0.55, 0.38);
+    det.reset([0, 0.9, 0.9, 0.9, 0.9, 0.9]);
+    det.reset();
+    expect(det.update(dofFor(4, 0.6), 16)).toEqual([expect.objectContaining({ string: 4 })]);
+  });
 });

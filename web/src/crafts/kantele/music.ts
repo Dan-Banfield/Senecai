@@ -108,6 +108,19 @@ export class PluckDetector {
     public off = 0.38,
   ) {}
 
+  /**
+   * Resynchronise after a tracking gap (or at startup). With a DoF vector, `prev` is synced to it
+   * and any string already curled above `off` is disarmed, so it must extend below `off` and curl
+   * again before it plucks; strings below `off` are armed. Without one, everything is open and armed.
+   */
+  reset(dof?: readonly number[]) {
+    for (let s = 0; s < 5; s++) {
+      const v = dof ? dof[STRING_DOF[s]] : 0;
+      this.prev[s] = v;
+      this.armed[s] = !(v > this.off);
+    }
+  }
+
   update(dof: number[], dtMs: number): { string: number; velocity: number }[] {
     const out: { string: number; velocity: number }[] = [];
     for (let s = 0; s < 5; s++) {
