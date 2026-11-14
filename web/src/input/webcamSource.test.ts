@@ -22,17 +22,18 @@ function syntheticLandmarks(curl: number, side: Side, thumbRotate = 0) {
   return { world, image };
 }
 
+function readLandmarks(side: Side, curl: number, rot = 0) {
+  const { world, image } = syntheticLandmarks(curl, side, rot);
+  const body: Record<string, JointFrame> = {};
+  landmarksToJoints(side, world, image, body);
+  const hands = parseFrame({ version: 3, fps: 30, scene: { timestamp: 0, actors: [{ name: 'w', meta: { hasGloves: true, hasLeftGlove: side === 'left', hasRightGlove: side === 'right', hasBody: false, hasFace: false }, body }], props: [] } });
+  return { raw: measure(hands[side]!, defaultCalibration()[side]), hand: hands[side]! };
+}
+
 describe('webcam emulator', () => {
   for (const side of ['left', 'right'] as Side[]) {
     it(`${side} hand: landmark-derived frames track curl`, () => {
-      const cal = defaultCalibration();
-      const read = (curl: number, rot = 0) => {
-        const { world, image } = syntheticLandmarks(curl, side, rot);
-        const body: Record<string, JointFrame> = {};
-        landmarksToJoints(side, world, image, body);
-        const hands = parseFrame({ version: 3, fps: 30, scene: { timestamp: 0, actors: [{ name: 'w', meta: { hasGloves: true, hasLeftGlove: side === 'left', hasRightGlove: side === 'right', hasBody: false, hasFace: false }, body }], props: [] } });
-        return { raw: measure(hands[side]!, cal[side]), hand: hands[side]! };
-      };
+      const read = (curl: number, rot = 0) => readLandmarks(side, curl, rot);
       const open = read(0);
       const half = read(0.5, 0.5);
       const fist = read(1, 1);
@@ -45,6 +46,24 @@ describe('webcam emulator', () => {
       expect(open.hand.wristRotation.angleTo(new Quaternion())).toBeLessThan(0.15);
       // Open hand: fingers nearly straight.
       expect(open.raw[2]).toBeLessThan(10);
+    });
+
+    it(`${side} hand: curl sweep past 90 degrees has no frame flip`, () => {
+      // curl 0..1 bends the index proximal joint to 80 deg and the medial bone
+      // to ~175 deg from the palm plane, so every bone passes the palm normal.
+      const steps = 100;
+      let prev = readLandmarks(side, 0).raw;
+      for (let s = 1; s <= steps; s++) {
+        const c = s / steps;
+        const raw = readLandmarks(side, c, c).raw;
+        // Index: ~2.35 deg of summed flex per step.
+        expect(raw[2]).toBeGreaterThanOrEqual(prev[2] - 0.5);
+        expect(raw[2] - prev[2]).toBeLessThan(6);
+        // Thumb bend must not jump either.
+        expect(Math.abs(raw[1] - prev[1])).toBeLessThan(6);
+        prev = raw;
+      }
+      expect(prev[2]).toBeGreaterThan(200);
     });
   }
 });

@@ -2,6 +2,7 @@ import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { RobotHand } from '../../robot/RobotHand';
+import { installAudioUnlock } from './audio';
 import { STRINGS } from './music';
 import { NOTE_SPEED, STRING_Y, type KanteleSession } from './session';
 
@@ -150,6 +151,8 @@ function Ticker({ session }: { session: KanteleSession }) {
 
 export function KanteleStage({ session, side = 'right' }: { session: KanteleSession; side?: 'left' | 'right' }) {
   const mirror = side === 'left' ? -1 : 1;
+  // Free play has no Start button, so unlock audio on the first click/key anywhere.
+  useEffect(() => installAudioUnlock(), []);
   return (
     <Canvas shadows="percentage" camera={{ fov: 42, near: 0.1, far: 60 }} dpr={[1, 2]}>
       <color attach="background" args={['#14191b']} />

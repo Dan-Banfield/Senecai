@@ -2,16 +2,17 @@
 //
 // For each tracked hand we rebuild what Rokoko Studio would stream for a glove:
 // a `<side>Hand` joint plus Proximal/Medial/Distal/Tip for every finger, each
-// with a position and an absolute orientation. Orientations are built from bone
-// directions plus the palm normal, so the relative joint rotations encode real
-// finger flexion, just as they do in Studio's data.
+// with a position and an absolute orientation. The hand frame comes from the
+// middle metacarpal and the palm normal; each phalanx frame from its bone
+// direction plus a fixed lateral (flex) axis, so the relative joint rotations
+// encode real finger flexion, just as they do in Studio's data.
 //
 // Best tracking pose: hand raised, palm facing the camera. That pose is also
 // the "neutral" robot wrist orientation (identity), so no calibration is needed
 // to get started.
 
 import { FilesetResolver, HandLandmarker, type HandLandmarkerResult, type Landmark, type NormalizedLandmark } from '@mediapipe/tasks-vision';
-import { Vector3 } from 'three';
+import { Matrix4, Quaternion, Vector3 } from 'three';
 import { basisQuaternion } from '../rokoko/build';
 import { FINGERS, PHALANGES, fingerJoint, handJoint, type JointFrame, type RokokoFrame, type Side } from '../rokoko/types';
 import type { HandSource, SourceStatus } from './types';
@@ -32,6 +33,22 @@ const CHAINS: Record<(typeof FINGERS)[number], [number, number, number, number]>
 
 /** MediaPipe world space (x right in image, y down, z away from camera) -> Rokoko (x = user's right, y up, z towards camera). */
 const toRokoko = (l: Landmark) => new Vector3(-l.x, -l.y, -l.z);
+
+/**
+ * Orientation whose +Y points along `forward` and +X along (orthogonalised)
+ * `lateral`, with +Z = X × Y, matching basisQuaternion's handedness. Flexion
+ * rotates a bone about the lateral axis, so unlike a palm-normal reference it
+ * never becomes parallel to the bone and the frame cannot flip past 90°.
+ */
+function lateralQuaternion(forward: Vector3, lateral: Vector3): Quaternion {
+  const y = forward.clone().normalize();
+  const x = lateral.clone().addScaledVector(y, -lateral.dot(y)).normalize();
+  const z = new Vector3().crossVectors(x, y);
+  return new Quaternion().setFromRotationMatrix(new Matrix4().makeBasis(x, y, z));
+}
+
+/** Thumb rest splay in the palm plane (radians), matching build.ts. */
+const THUMB_SPLAY = 0.8;
 
 const r5 = (v: number) => Math.round(v * 1e5) / 1e5;
 const jf = (p: Vector3, q: { x: number; y: number; z: number; w: number }): JointFrame => ({
@@ -57,11 +74,25 @@ export function landmarksToJoints(side: Side, world: Landmark[], image: Normaliz
   const handQ = basisQuaternion(pts[9].clone().sub(pts[0]), normal);
   body[handJoint(side)] = jf(wristPos, handQ);
 
+  // Flex axes. Fingers: the hand's +X, i.e. the index->little knuckle line
+  // (pts[17]-pts[5], sign flipped for the left hand) made perpendicular to the
+  // middle metacarpal, so a straight finger has exactly the hand's orientation.
+  // Thumb: that axis turned by the rest splay within the palm plane, i.e.
+  // perpendicular to a relaxed thumb. A thumb bone would have to point along
+  // the palm towards the little-finger knuckles (or back past the wrist) to
+  // line up with it, which keeps the thumb clear of the L-pose (thumb along
+  // the knuckle line) that a plain hand-X reference would degenerate on.
+  const handX = new Vector3(1, 0, 0).applyQuaternion(handQ);
+  const handY = new Vector3(0, 1, 0).applyQuaternion(handQ);
+  const sgn = side === 'right' ? 1 : -1;
+  const thumbX = handX.clone().multiplyScalar(Math.cos(THUMB_SPLAY)).addScaledVector(handY, sgn * Math.sin(THUMB_SPLAY));
+
   for (const finger of FINGERS) {
     const chain = CHAINS[finger];
+    const lateral = finger === 'Thumb' ? thumbX : handX;
     let lastQ = handQ;
     PHALANGES.forEach((ph, i) => {
-      if (i < 3) lastQ = basisQuaternion(pts[chain[i + 1]].clone().sub(pts[chain[i]]), normal);
+      if (i < 3) lastQ = lateralQuaternion(pts[chain[i + 1]].clone().sub(pts[chain[i]]), lateral);
       body[fingerJoint(side, finger, ph)] = jf(at(chain[i]), lastQ);
     });
   }
@@ -80,8 +111,12 @@ export class WebcamSource implements HandSource {
   async start(onFrame: (f: RokokoFrame) => void, onStatus: (s: SourceStatus) => void) {
     this.running = true;
     onStatus({ state: 'starting', message: 'Loading hand tracker…' });
-    this.landmarker = await this.createLandmarker();
-    if (!this.running) return;
+    const lm = await this.createLandmarker();
+    if (!this.running) {
+      lm.close();
+      return;
+    }
+    this.landmarker = lm;
 
     onStatus({ state: 'starting', message: 'Waiting for camera permission…' });
     this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });

@@ -83,6 +83,22 @@ export function lessonFromRecording(creation: { id: string; title: string; autho
   };
 }
 
+/** Velocity used when the frame interval is unknown (dt <= 0). */
+const DEFAULT_VELOCITY = 0.7;
+
+/**
+ * Maps a DoF rise rate (normalised flexion per second) to a pluck velocity in [0.35, 1].
+ * A slow, deliberate curl (~1.75 /s) gives ~0.4; a fast flick (~9 /s or more) reaches 1.
+ * The retargeter's DoF smoothing (tau 0.03 s gloves, 0.07 s webcam) caps the rate seen at
+ * the `on` threshold at roughly 15 /s (gloves) and 6-7 /s (webcam) even for an instant
+ * step, so gloves can hit full velocity and a fast webcam pluck lands around 0.8.
+ */
+export function pluckVelocity(delta: number, dtMs: number): number {
+  if (!(dtMs > 0)) return DEFAULT_VELOCITY;
+  const rate = delta / Math.max(1e-3, dtMs / 1000);
+  return Math.min(1, Math.max(0.35, 0.25 + rate * 0.085));
+}
+
 /** Rising-edge pluck detection on the robot's finger DoFs, with hysteresis. */
 export class PluckDetector {
   private armed = [true, true, true, true, true];
@@ -97,8 +113,7 @@ export class PluckDetector {
     for (let s = 0; s < 5; s++) {
       const v = dof[STRING_DOF[s]];
       if (this.armed[s] && v > this.on) {
-        const rate = (v - this.prev[s]) / Math.max(1, dtMs / 1000) ;
-        out.push({ string: s, velocity: Math.min(1, Math.max(0.35, rate * 0.25 + 0.5)) });
+        out.push({ string: s, velocity: pluckVelocity(v - this.prev[s], dtMs) });
         this.armed[s] = false;
       } else if (!this.armed[s] && v < this.off) {
         this.armed[s] = true;

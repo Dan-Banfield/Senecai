@@ -102,6 +102,8 @@ if (typeof window !== 'undefined') {
 const UP = new THREE.Vector3(0, 1, 0);
 const TABLE = new THREE.Plane(UP, 0);
 const otherSide = (s: Side): Side => (s === 'right' ? 'left' : 'right');
+/** Aim for when the working hand is out of view: nothing under it but the table. */
+const tableAim = (): Aim => ({ point: new THREE.Vector3(), normal: UP.clone(), ray: new THREE.Ray(), hit: { type: 'table' }, station: null, tool: null });
 
 export class BenchSession {
   bench: Bench;
@@ -122,10 +124,15 @@ export class BenchSession {
   private recorder: BenchRecorder;
   private pending: Op[] = [];
   private squeezing = false;
+  /** False after the working hand changes sides, until the new hand opens: no squeeze carried over. */
+  private squeezeArmed = true;
   private offClosed = false;
+  /** A turn was applied recently and its remainder has not been flushed yet. */
+  private turnPending = false;
   private lastOffX: number | null = null;
-  private yawSent: Record<string, number> = {};
-  private rollSent: Record<string, number> = {};
+  /** Last yaw / roll recorded per workpiece (by an op, or the start): what replay shows. */
+  private yawSent: Record<string, number>;
+  private rollSent: Record<string, number>;
   /** Off-hand pose when it picked the piece up: the piece follows the hand relative to this. */
   private holdAnchor: { p: THREE.Vector3; q: THREE.Quaternion } | null = null;
   private offLostAt: number | null = null;
@@ -143,6 +150,8 @@ export class BenchSession {
     readonly mode: BenchMode,
   ) {
     this.bench = new Bench(def);
+    this.yawSent = { ...def.start.yaw };
+    this.rollSent = { ...def.start.roll };
     this.recorder = new BenchRecorder(def.id, usePipeline.getState().kind ?? 'none');
     if (mode.kind === 'replay') {
       this.player = new BenchPlayer(mode.recording, this.bench);
@@ -210,6 +219,7 @@ export class BenchSession {
 
   emit = (op: Op) => {
     this.bench.apply(op);
+    if (op.w === '$' && (op.k === 'yaw' || op.k === 'roll')) (op.k === 'yaw' ? this.yawSent : this.rollSent)[op.wp as string] = op.v as number;
     this.pending.push(op);
     this.effectFor(op);
   };
@@ -390,8 +400,7 @@ export class BenchSession {
     s.yaw[wp] = v; // turn smoothly; ops are sent in coarser steps below
     this.bench.version++;
     if (Math.abs(v - (this.yawSent[wp] ?? 0)) > 0.02) {
-      this.yawSent[wp] = v;
-      this.emit({ w: '$', k: 'yaw', wp, v: Math.round(v * 1000) / 1000 });
+      this.emit({ w: '$', k: 'yaw', wp, v: r3(v) });
     }
   }
 
@@ -402,9 +411,41 @@ export class BenchSession {
     s.roll[wp] = v;
     this.bench.version++;
     if (Math.abs(v - (this.rollSent[wp] ?? 0)) > 0.02) {
-      this.rollSent[wp] = v;
       this.emit({ w: '$', k: 'roll', wp, v: r3(v) });
     }
+  }
+
+  /**
+   * Turning stopped: send what is left of it, so the recorded ops end on the
+   * exact angle shown live and replay doesn't drift from the cuts.
+   */
+  private settleTurn(ctx: InteractCtx) {
+    const s = this.bench.state;
+    for (const [axis, sent, k] of [
+      [s.yaw, this.yawSent, 'yaw'],
+      [s.roll, this.rollSent, 'roll'],
+    ] as const) {
+      for (const [wp, v] of Object.entries(axis)) if (v !== (sent[wp] ?? 0)) this.emit({ w: '$', k, wp, v: r3(v) });
+    }
+    // A craft's own turn flushes its remainder on a turn of 0.
+    this.def.turn?.(ctx, 0);
+  }
+
+  /** The working hand moved to the other side: carry the tool across and forget the old hand's state. */
+  private switchPrimary(side: Side) {
+    this.hands[side].tool = this.hands[this.primary].tool;
+    this.hands[this.primary].tool = null;
+    this.primary = side;
+    // The new working hand's grip must open before it counts as a squeeze (no phantom press),
+    // and the new off hand's fist must open before it picks anything up.
+    this.squeezing = false;
+    this.squeezeArmed = false;
+    this.offClosed = true;
+    this.lastOffX = null;
+    this.offLostAt = null;
+    this.holdAnchor = null;
+    this.smoothTip = { left: null, right: null };
+    this.carveMix = { left: 0, right: 0 };
   }
 
   /** A held-able piece the off hand could pick up now, if any. */
@@ -425,7 +466,6 @@ export class BenchSession {
 
   private startHold(wp: string, side: Side, off: RobotHandCommand) {
     this.holdAnchor = { p: off.position.clone(), q: off.rotation.clone() };
-    this.rollSent[wp] = this.bench.state.roll[wp] ?? 0;
     this.emit({ w: '$', k: 'place', wp, at: `held:${side}` });
     this.say('Got it. Move and turn your hand to bring the wood to the knife. Q / E roll it, V swaps ends, open your hand to set it down.', 'info');
   }
@@ -492,21 +532,23 @@ export class BenchSession {
       }
     }
 
-    const cmd = primaryCommand();
-    const off = secondaryCommand();
+    let cmd = primaryCommand();
+    let off = secondaryCommand();
+    if (cmd && cmd.side !== this.primary) {
+      if (this.bench.carriedBy(this.primary) || this.bench.heldBy(otherSide(this.primary))) {
+        // Something is in the tongs or in the other fist: keep each hand's role rather than
+        // swap mid-task. The working hand counts as missing; a hand on the other side is the off hand.
+        [cmd, off] = [off, cmd];
+      } else this.switchPrimary(cmd.side);
+    }
 
     if (cmd) {
       const side = cmd.side;
-      if (side !== this.primary) {
-        // Dominant hand switched: move the tool across.
-        this.hands[side].tool = this.hands[this.primary].tool;
-        this.hands[this.primary].tool = null;
-        this.primary = side;
-      }
       const aim = this.computeAim(cmd, camera);
       this.aim = aim;
       const was = this.squeezing;
-      this.squeezing = was ? cmd.grip > 0.5 : cmd.grip > 0.7;
+      if (cmd.grip <= 0.5) this.squeezeArmed = true;
+      this.squeezing = this.squeezeArmed && (was ? cmd.grip > 0.5 : cmd.grip > 0.7);
       const pressed = this.squeezing && !was;
       const released = !this.squeezing && was;
       const ctx = this.ctx(side, aim, cmd, dt, pressed, released);
@@ -523,7 +565,6 @@ export class BenchSession {
         } else this.def.onKey?.(this.ctx(side, aim, cmd, dt), k);
       }
       if (!handled) this.def.interact(this.ctx(side, aim, cmd, dt, pressed, released));
-      this.def.simulate?.(this.ctx(side, aim, cmd, dt));
       this.hands[side].pose = this.posePrimary(side, cmd, aim, dt);
       this.hoverText = this.describe(aim, side);
     } else {
@@ -533,13 +574,17 @@ export class BenchSession {
       this.hoverText = null;
       keyPresses.length = 0;
     }
+    // Heating and cooling run on whether or not a hand is in view.
+    this.def.simulate?.(this.ctx(this.primary, this.aim ?? tableAim(), cmd, dt));
 
     // The other hand: hold the work in the fist, or steady and turn it.
     const offSide = otherSide(this.primary);
     const turnCtx = this.aim ? this.ctx(offSide, this.aim, off, dt) : null;
+    let turned = false;
     if (turnCtx) {
       if (keys.has('q')) this.turn(turnCtx, -1.6 * dt);
       if (keys.has('e')) this.turn(turnCtx, 1.6 * dt);
+      turned = keys.has('q') || keys.has('e');
     }
     let held = this.bench.heldBy(offSide);
     if (off) {
@@ -559,7 +604,10 @@ export class BenchSession {
       }
       if (!held) {
         if (closed && turnCtx) {
-          if (this.lastOffX !== null) this.turn(turnCtx, (off.position.x - this.lastOffX) * 2.2);
+          if (this.lastOffX !== null) {
+            this.turn(turnCtx, (off.position.x - this.lastOffX) * 2.2);
+            turned = true;
+          }
           this.lastOffX = off.position.x;
         } else this.lastOffX = null;
         const wp = this.def.turnTarget?.(this.bench) ?? [...this.bench.workpieces.keys()][0];
@@ -580,6 +628,11 @@ export class BenchSession {
     } else {
       this.hands[offSide].pose = undefined;
       this.lastOffX = null;
+    }
+    if (turned) this.turnPending = true;
+    else if (this.turnPending) {
+      this.turnPending = false;
+      this.settleTurn(this.ctx(offSide, this.aim ?? tableAim(), off, dt));
     }
     // Close in on the hands while holding something.
     const hv = held ? this.holdView(held) : null;

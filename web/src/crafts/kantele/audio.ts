@@ -48,8 +48,37 @@ export function unlockAudio() {
   if (ctx.state === 'suspended') void ctx.resume();
 }
 
+/**
+ * Unlocks audio on the first user gesture anywhere on the page, so free play has
+ * sound without pressing Start/Record. Listeners stay until the context is actually
+ * running (a touch pointerdown alone doesn't count as activation in some browsers),
+ * then remove themselves. Returns a cleanup that removes them early.
+ */
+export function installAudioUnlock(): () => void {
+  if (typeof window === 'undefined') return () => {};
+  const events = ['pointerdown', 'pointerup', 'touchend', 'keydown'] as const;
+  const remove = () => {
+    for (const e of events) window.removeEventListener(e, onGesture, true);
+  };
+  function onGesture() {
+    unlockAudio();
+    if (!ctx || ctx.state === 'running') return remove();
+    ctx.resume().then(
+      () => {
+        if (ctx?.state === 'running') remove();
+      },
+      () => {},
+    );
+  }
+  if (ctx?.state === 'running') return () => {};
+  for (const e of events) window.addEventListener(e, onGesture, true);
+  return remove;
+}
+
 export function pluckString(index: number, velocity = 0.8) {
   if (!ctx || !out || !buffers[index]) return;
+  // Contexts can be suspended again (e.g. tab backgrounded); resume works once the page has had a gesture.
+  if (ctx.state === 'suspended') void ctx.resume();
   const src = ctx.createBufferSource();
   src.buffer = buffers[index];
   const g = ctx.createGain();

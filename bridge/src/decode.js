@@ -59,8 +59,13 @@ export function decodeDatagram(buf) {
   if (frame === undefined) {
     return { ok: false, error: 'Datagram is neither JSON nor LZ4-compressed JSON. In Studio, set the custom stream data format to JSON v3.' };
   }
-  if (!frame.scene || !Array.isArray(frame.scene.actors)) {
+  // JSON can also be null, a number, a string or an array: none of those are frames.
+  const isObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
+  if (!isObject(frame) || !isObject(frame.scene) || !Array.isArray(frame.scene.actors)) {
     return { ok: false, error: 'JSON received, but it is not a Rokoko v3 frame (missing scene.actors).' };
+  }
+  if (!frame.scene.actors.every(isObject)) {
+    return { ok: false, error: 'JSON received, but scene.actors contains non-object entries.' };
   }
   return { ok: true, frame, text: JSON.stringify(frame), compression };
 }

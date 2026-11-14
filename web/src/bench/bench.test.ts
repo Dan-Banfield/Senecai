@@ -1,12 +1,29 @@
 import * as THREE from 'three';
-import { describe, expect, it } from 'vitest';
-import { Bench, biteOf, type InteractCtx, type Op } from './core';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RobotHandCommand } from '../robot/retarget';
+import type { Side } from '../rokoko/types';
+import { Bench, biteOf, r3, type InteractCtx, type Op } from './core';
 import { BENCH_IDS, benchFor } from './crafts';
 import { shave } from './crafts/kit';
 import { ForgeBar } from './materials/forge';
 import { surfaceNets } from './materials/mesh';
 import { VoxelBlock, type VC } from './materials/voxel';
 import { BenchPlayer, type BenchRecording } from './recording';
+import { BenchSession, useBenchUi } from './session';
+
+// The session reads hands from the input pipeline and keys from window; stand both in.
+const input = vi.hoisted(() => {
+  (globalThis as { window?: EventTarget }).window ??= new EventTarget();
+  return { dominant: 'right' as 'left' | 'right', commands: {} as Partial<Record<'left' | 'right', unknown>> };
+});
+vi.mock('../input/pipeline', () => {
+  const primarySide = () => (input.commands[input.dominant] ? input.dominant : input.dominant === 'right' ? 'left' : 'right');
+  return {
+    usePipeline: { getState: () => ({ kind: 'test' }) },
+    primaryCommand: () => input.commands[primarySide()],
+    secondaryCommand: () => input.commands[primarySide() === 'right' ? 'left' : 'right'],
+  };
+});
 
 const rec = (craft: BenchRecording['craft'], opsPerFrame: Op[][]): BenchRecording => ({
   version: 2,
@@ -206,5 +223,154 @@ describe('surface nets', () => {
     expect(box.max.x - box.min.x).toBeCloseTo(e.x, 5);
     expect(box.max.y - box.min.y).toBeCloseTo(e.y, 5);
     expect(box.min.y).toBeCloseTo(0, 5);
+  });
+});
+
+describe('puukko handle turning', () => {
+  const turnCtx = (b: Bench, ops: Op[]) =>
+    ({
+      b,
+      mem: {},
+      emit: (op: Op) => {
+        b.apply(op);
+        ops.push(op);
+      },
+      say: () => {},
+    }) as unknown as InteractCtx;
+
+  it('changes the yaw only through ops, and a turn of 0 flushes the remainder', () => {
+    const def = benchFor('puukko');
+    const live = new Bench(def);
+    live.apply({ w: '$', k: 'place', wp: 'blade', at: 'forge' }); // so turns go to the handle
+    const ops: Op[] = [];
+    const ctx = turnCtx(live, ops);
+    const replay = new Bench(def);
+    replay.apply({ w: '$', k: 'place', wp: 'blade', at: 'forge' });
+    let total = live.state.yaw.handle;
+    const deltas = [0.004, 0.003, 0.0071, -0.002, 0.026, 0.0009, 0.0013, 0.0042, -0.0105, 0.0033, 0.0061];
+    for (const d of deltas) {
+      const n = ops.length;
+      def.turn!(ctx, d);
+      total += d;
+      for (const op of ops.slice(n)) replay.apply(op);
+      // Live never runs ahead of what the recording would show.
+      expect(replay.state.yaw.handle).toBe(live.state.yaw.handle);
+    }
+    expect(live.state.yaw.handle).not.toBe(r3(total)); // a remainder is pending
+    def.turn!(ctx, 0);
+    const fresh = new Bench(def);
+    for (const op of [{ w: '$', k: 'place', wp: 'blade', at: 'forge' }, ...ops]) fresh.apply(op);
+    expect(live.state.yaw.handle).toBe(r3(total));
+    expect(fresh.state.yaw.handle).toBe(live.state.yaw.handle);
+  });
+
+  it('picks up from a yaw set by another op instead of jumping back', () => {
+    const b = new Bench(benchFor('puukko'));
+    b.apply({ w: '$', k: 'place', wp: 'blade', at: 'forge' });
+    const ops: Op[] = [];
+    const ctx = turnCtx(b, ops);
+    b.def.turn!(ctx, 0.05);
+    b.apply({ w: '$', k: 'yaw', wp: 'handle', v: 2 }); // swap ends
+    b.def.turn!(ctx, 0.05);
+    expect(b.state.yaw.handle).toBe(2.05);
+  });
+});
+
+describe('the bench session', () => {
+  const camera = new THREE.PerspectiveCamera(50, 1.5, 0.1, 100);
+  camera.position.set(0, 9.4, 10.8);
+  camera.lookAt(0, 0.5, 0.5);
+  camera.updateMatrixWorld();
+
+  const hand = (side: Side, grip: number, x = 0): RobotHandCommand => ({
+    side,
+    dof: [grip, grip, grip, grip, grip, grip],
+    raw: [0, 0, 0, 0, 0, 0],
+    position: new THREE.Vector3(x, 0, 0),
+    rotation: new THREE.Quaternion(),
+    grip,
+  });
+  const ticks = (s: BenchSession, n: number, dtMs = 16) => {
+    for (let i = 0; i < n; i++) s.tick(dtMs, camera);
+  };
+  const start = () => {
+    const s = new BenchSession(benchFor('puukko'), { kind: 'free' });
+    s.activate();
+    return s;
+  };
+  const priv = (s: BenchSession) => s as unknown as { squeezing: boolean };
+
+  beforeEach(() => {
+    input.dominant = 'right';
+    input.commands = {};
+  });
+
+  it('keeps heating the bar in the forge with no hand in view', () => {
+    const s = start();
+    s.emit({ w: '$', k: 'place', wp: 'blade', at: 'forge' });
+    ticks(s, 60);
+    expect(s.bench.wp<ForgeBar>('blade').temp).toBeGreaterThan(0.1);
+  });
+
+  it('does not hand the tongs to the other hand while they carry the bar', () => {
+    const s = start();
+    s.hands.right.tool = 'tongs';
+    s.emit({ w: '$', k: 'place', wp: 'blade', at: 'carried:right' });
+    input.commands = { left: hand('left', 0) };
+    ticks(s, 3);
+    expect(s.primary).toBe('right');
+    expect(s.hands.right.tool).toBe('tongs');
+    expect(s.hands.left.tool).toBeNull();
+    expect(s.bench.state.place.blade).toBe('carried:right');
+    expect(s.hands.right.pose).toBeUndefined();
+    expect(s.hands.left.pose).toBeDefined(); // still the off hand
+  });
+
+  it('keeps holding the birch in the off hand when the working hand drops out', () => {
+    const s = start();
+    s.hands.right.tool = 'knife';
+    s.emit({ w: '$', k: 'place', wp: 'handle', at: 'held:left' });
+    input.commands = { left: hand('left', 0.9) };
+    ticks(s, 60);
+    expect(s.primary).toBe('right');
+    expect(s.hands.right.tool).toBe('knife');
+    expect(s.bench.state.place.handle).toBe('held:left');
+  });
+
+  it('a closed hand taking over the tool does not count as a fresh squeeze until it opens', () => {
+    const s = start();
+    s.hands.right.tool = 'hammer';
+    input.commands = { right: hand('right', 1) };
+    ticks(s, 2);
+    expect(priv(s).squeezing).toBe(true);
+    input.commands = { left: hand('left', 1) };
+    ticks(s, 2);
+    expect(s.primary).toBe('left');
+    expect(s.hands.left.tool).toBe('hammer');
+    expect(s.hands.right.tool).toBeNull();
+    expect(priv(s).squeezing).toBe(false);
+    input.commands = { left: hand('left', 0.2) };
+    ticks(s, 1);
+    input.commands = { left: hand('left', 1) };
+    ticks(s, 1);
+    expect(priv(s).squeezing).toBe(true);
+  });
+
+  it('records the exact handle angle when Q / E turning stops', () => {
+    const s = start();
+    s.emit({ w: '$', k: 'place', wp: 'blade', at: 'forge' }); // turns go to the handle
+    input.commands = { right: hand('right', 0) };
+    const key = (type: string, k: string) => window.dispatchEvent(Object.assign(new Event(type), { key: k }));
+    const before = s.bench.state.yaw.handle;
+    key('keydown', 'e');
+    ticks(s, 7, 5); // 0.008 rad a tick: smaller than one op step
+    key('keyup', 'e');
+    ticks(s, 2, 5);
+    expect(s.bench.state.yaw.handle).toBe(r3(before + 7 * 1.6 * 0.005));
+    s.finish();
+    const rec = useBenchUi.getState().lastRecording!;
+    const replay = new Bench(benchFor('puukko'));
+    new BenchPlayer(rec, replay).advance(rec.durationMs + 1);
+    expect(replay.state.yaw.handle).toBe(s.bench.state.yaw.handle);
   });
 });

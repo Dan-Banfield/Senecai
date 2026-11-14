@@ -16,9 +16,13 @@ import { KeyboardSource } from './keyboardSource';
 import type { HandSource, SourceKind, SourceStatus } from './types';
 import { WebcamSource } from './webcamSource';
 
+const NO_HANDS = (): HumanHands => ({ actorName: '', timestamp: 0 });
+/** A source is considered gone once no frame has arrived for this long. */
+const STALE_MS = 500;
+
 export const live = {
   frame: null as RokokoFrame | null,
-  hands: { actorName: '', timestamp: 0 } as HumanHands,
+  hands: NO_HANDS(),
   commands: {} as Partial<Record<Side, RobotHandCommand>>,
   frameCount: 0,
   lastFrameAt: 0,
@@ -100,6 +104,7 @@ export const usePipeline = create<PipelineStore>()(
         live.source?.stop();
         live.source = null;
         live.commands = {};
+        live.hands = NO_HANDS();
         live.frame = null;
         set({ kind: null, status: { state: 'idle', message: 'No input selected' }, present: { left: false, right: false }, fps: 0 });
       },
@@ -112,6 +117,7 @@ export const usePipeline = create<PipelineStore>()(
 
       calibrate(step) {
         const kind = get().kind;
+        if (performance.now() - live.lastFrameAt > STALE_MS) return null;
         const side = live.hands[get().settings.dominant] ? get().settings.dominant : live.hands.right ? 'right' : live.hands.left ? 'left' : null;
         if (!kind || !side) return null;
         const hand = live.hands[side]!;
@@ -166,23 +172,58 @@ setInterval(() => {
   const s = usePipeline.getState();
   const fps = (live.frameCount - lastCount) * 2;
   lastCount = live.frameCount;
-  const stale = performance.now() - live.lastFrameAt > 500;
-  if (stale) live.commands = {};
+  const stale = performance.now() - live.lastFrameAt > STALE_MS;
+  if (stale) {
+    live.commands = {};
+    live.hands = NO_HANDS();
+  }
   const present = { left: !stale && !!live.commands.left, right: !stale && !!live.commands.right };
   if (fps !== s.fps || present.left !== s.present.left || present.right !== s.present.right) usePipeline.setState({ fps, present });
 }, 500);
 
 // Optional: mirror retargeted commands to a physical robot hand via the bridge.
+// Reconnects with exponential backoff, and reopens when bridgeUrl changes.
+const ROBOT_BACKOFF_MIN = 500;
+const ROBOT_BACKOFF_MAX = 10_000;
 let robotWs: WebSocket | null = null;
+let robotUrl = '';
+let robotBackoff = ROBOT_BACKOFF_MIN;
+let robotRetryAt = 0;
+
+function resetRobotLink() {
+  robotWs?.close();
+  robotWs = null;
+  robotUrl = '';
+  robotBackoff = ROBOT_BACKOFF_MIN;
+  robotRetryAt = 0;
+}
+
+function connectRobot(url: string) {
+  robotUrl = url;
+  robotRetryAt = performance.now() + robotBackoff;
+  robotBackoff = Math.min(robotBackoff * 2, ROBOT_BACKOFF_MAX);
+  try {
+    const ws = new WebSocket(url);
+    ws.onopen = () => {
+      if (ws === robotWs) robotBackoff = ROBOT_BACKOFF_MIN;
+    };
+    robotWs = ws;
+  } catch (e) {
+    // Invalid URL (SyntaxError): keep backing off until the user fixes it.
+    robotWs = null;
+    console.warn('Robot mirror: cannot open', url, e);
+  }
+}
+
 setInterval(() => {
   const { settings } = usePipeline.getState();
   if (!settings.mirrorRobot) {
-    robotWs?.close();
-    robotWs = null;
+    if (robotUrl) resetRobotLink();
     return;
   }
+  if (robotUrl && settings.bridgeUrl !== robotUrl) resetRobotLink();
   if (!robotWs || robotWs.readyState === WebSocket.CLOSED) {
-    robotWs = new WebSocket(settings.bridgeUrl);
+    if (performance.now() >= robotRetryAt) connectRobot(settings.bridgeUrl);
     return;
   }
   if (robotWs.readyState !== WebSocket.OPEN) return;

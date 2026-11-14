@@ -32,3 +32,11 @@ test('rejects garbage and non-Rokoko JSON', () => {
   assert.equal(decodeDatagram(Buffer.from([1, 2, 3, 4, 5])).ok, false);
   assert.equal(decodeDatagram(Buffer.from('{"hello":1}')).ok, false);
 });
+
+test('rejects JSON that is not an object frame, without throwing', () => {
+  for (const payload of ['null', '42', '"str"', '[]', '{"scene":{"actors":[null]}}', '{"scene":null}']) {
+    const r = decodeDatagram(Buffer.from(payload));
+    assert.equal(r.ok, false, payload);
+    assert.equal(typeof r.error, 'string', payload);
+  }
+});

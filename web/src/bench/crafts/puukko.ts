@@ -3,7 +3,7 @@
 // quench it to harden, sharpen it on the whetstone, carve a birch handle and
 // fit the blade into it.
 
-import type { Bench, CraftBench, InteractCtx } from '../core';
+import { r3, type Bench, type CraftBench, type InteractCtx } from '../core';
 import { ForgeBar, TANG, WORKING_HEAT } from '../materials/forge';
 import { makeMask, VoxelBlock } from '../materials/voxel';
 import { every, FRONT, heat, onWp, resetHeat, shave, tool, warnOvercut } from './kit';
@@ -14,6 +14,8 @@ const HS = 0.045;
 const blade = (b: Bench) => b.wp<ForgeBar>('blade');
 const handle = (b: Bench) => b.wp<VoxelBlock>('handle');
 const EDGE = Math.PI / 2;
+/** Smallest handle turn (radians) worth an op while turning. */
+const YAW_STEP = 0.01;
 
 function handleTarget() {
   return makeMask(H, (x, y, z) => {
@@ -82,10 +84,19 @@ export const puukkoBench: CraftBench = {
       if (Math.abs(acc) > 0.45) toggleEdge(ctx);
       return;
     }
-    const v = (b.state.yaw.handle ?? 0) + delta;
-    b.state.yaw.handle = v;
-    b.version++;
-    if (every(ctx, 'yaw-handle', 12)) ctx.emit({ w: '$', k: 'yaw', wp: 'handle', v: Math.round(v * 1000) / 1000 });
+    // The yaw only ever changes through the op, so live and replay agree frame by frame.
+    // Small turns build up in `acc` until they are worth an op; a turn of 0 (sent when
+    // turning stops) flushes whatever is left, so the recording ends on the exact angle.
+    const cur = b.state.yaw.handle ?? 0;
+    let m = ctx.mem.yawHandle as { sent: number; acc: number } | undefined;
+    // Re-sync if something else set the yaw since (swap ends, a restart).
+    if (!m || m.sent !== cur) ctx.mem.yawHandle = m = { sent: cur, acc: cur };
+    m.acc += delta;
+    const v = r3(m.acc);
+    if (v !== cur && (delta === 0 || Math.abs(v - cur) > YAW_STEP)) {
+      m.sent = v;
+      ctx.emit({ w: '$', k: 'yaw', wp: 'handle', v });
+    }
   },
   onKey(ctx, key) {
     if (key === 'r' && ctx.b.placedAt('blade')) toggleEdge(ctx);
