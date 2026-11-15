@@ -31,7 +31,7 @@ function useRestoreSource() {
 function Shell() {
   const home = useLocation().pathname === '/';
   return (
-      <div className={`app ${home ? 'home' : ''}`}>
+      <div className={`app ${home ? 'home' : 'craft'}`}>
         <header className="header">
           {!home && <Brand />}
           <SearchBar />

@@ -18,7 +18,7 @@ import type { Side } from '../../rokoko/types';
 import { HOLD_POSES, holdPose, HOLE_NORMALS, HOLE_POSITIONS, HOLE_RADII, MODEL_POSITION, MODEL_ROTATION, MODEL_SCALE, MODEL_URL } from './stageGeometry';
 import { HOLES, type OcarinaView } from './types';
 
-const BACKGROUND = '#101517';
+const BACKGROUND = '#efe3c6';
 const COVERED = new THREE.Color('#5fbf6e');
 const SIDES: Side[] = ['left', 'right'];
 /** Where the camera looks: the middle of the instrument, a touch towards the player. */
@@ -191,7 +191,7 @@ function Scene({ getView }: { getView: () => OcarinaView }) {
       <fog attach="fog" args={[BACKGROUND, 5, 12]} />
       <CameraRig />
       <Reflections />
-      <hemisphereLight args={['#f4e6d0', '#161210', 0.55]} />
+      <hemisphereLight args={['#fff6e6', '#c9b48d', 0.7]} />
       <directionalLight
         position={[1.6, 4.5, 2.6]}
         intensity={2.3}
@@ -211,7 +211,7 @@ function Scene({ getView }: { getView: () => OcarinaView }) {
       <pointLight position={[1.2, 1.2, -2.4]} intensity={3} color="#9fc6d4" distance={7} />
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -1.7, 0]} receiveShadow>
         <planeGeometry args={[30, 30]} />
-        <meshStandardMaterial color="#1c2224" roughness={0.9} />
+        <meshStandardMaterial color="#e5d6b4" roughness={0.92} />
       </mesh>
       <Suspense fallback={null}>
         <Ocarina sample={sample} />

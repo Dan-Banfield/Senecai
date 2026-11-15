@@ -244,67 +244,88 @@ export default function OcarinaPage() {
   const status = usePipeline((s) => s.status);
   const mirror = usePipeline((s) => s.settings.mirrorRobot);
   const [calibrating, setCalibrating] = useState(false);
+  const [hudOpen, setHudOpen] = useState(true);
 
   return (
-    <div className="workspace">
-      <aside className="panel">
-        <div>
-          <h1>Ocarina</h1>
-          <div className="fi">ocarina · Budrio, Italy</div>
-          <p style={{ margin: '8px 0 0', color: 'var(--birch-dim)', fontSize: 14 }}>
-            Giuseppe Donati's clay vessel flute: each finger seals one hole, and the open area sets the pitch.
-          </p>
-        </div>
+    <div className="oc-page">
+      <div className="oc-stage-wrap">
+        <OcarinaStage getView={session.getView} />
+      </div>
 
-        <InputCard onCalibrate={() => setCalibrating(true)} />
-
-        <div className="tabs">
-          <button className={mode === 'free' ? 'on' : ''} onClick={() => session.setMode('free')}>
-            Free play
-          </button>
-          <button className={mode === 'lesson' ? 'on' : ''} onClick={() => session.setMode('lesson')}>
-            Lesson
-          </button>
-        </div>
-
-        {mode === 'free' ? <FreePlay /> : <LessonPanel session={session} />}
-
-        <RecordingCard session={session} />
-
-        <div className="card">
-          <div className="row">
-            <button className="btn small" onClick={() => session.setMuted(!muted)}>
-              {muted ? 'Unmute' : 'Mute'}
-            </button>
-            <span style={{ fontSize: 13, color: 'var(--birch-dim)' }}>Sound plays whenever a hole is covered.</span>
+      <aside className={`oc-hud${hudOpen ? '' : ' collapsed'}`}>
+        <div className="oc-hud-head">
+          <div>
+            <h1>Ocarina</h1>
+            <div className="fi">ocarina · Budrio, Italy</div>
           </div>
-          <p style={{ marginTop: 10, fontSize: 13 }}>
-            Robot mirror is {mirror ? 'on' : 'off'} (set it in the{' '}
-            <button className="oc-link" onClick={() => usePipeline.getState().setPanelOpen(true)}>
-              input panel
-            </button>
-            ). Replaying a take streams the recorded commands to the robot.
-          </p>
+          <button
+            type="button"
+            className="btn ghost small oc-hud-toggle"
+            aria-expanded={hudOpen}
+            onClick={() => setHudOpen((v) => !v)}
+          >
+            {hudOpen ? 'Hide' : 'Controls'}
+          </button>
         </div>
+
+        {hudOpen && (
+          <div className="oc-hud-body">
+            <p style={{ margin: 0, color: 'var(--birch-dim)', fontSize: 14 }}>
+              Giuseppe Donati's clay vessel flute: each finger seals one hole, and the open area sets the pitch.
+            </p>
+
+            <InputCard onCalibrate={() => setCalibrating(true)} />
+
+            <div className="tabs">
+              <button className={mode === 'free' ? 'on' : ''} onClick={() => session.setMode('free')}>
+                Free play
+              </button>
+              <button className={mode === 'lesson' ? 'on' : ''} onClick={() => session.setMode('lesson')}>
+                Lesson
+              </button>
+            </div>
+
+            {mode === 'free' ? <FreePlay /> : <LessonPanel session={session} />}
+
+            <RecordingCard session={session} />
+
+            <div className="card">
+              <div className="row">
+                <button className="btn small" onClick={() => session.setMuted(!muted)}>
+                  {muted ? 'Unmute' : 'Mute'}
+                </button>
+                <span style={{ fontSize: 13, color: 'var(--birch-dim)' }}>Sound plays whenever a hole is covered.</span>
+              </div>
+              <p style={{ marginTop: 10, fontSize: 13 }}>
+                Robot mirror is {mirror ? 'on' : 'off'} (set it in the{' '}
+                <button className="oc-link" onClick={() => usePipeline.getState().setPanelOpen(true)}>
+                  input panel
+                </button>
+                ). Replaying a take streams the recorded commands to the robot.
+              </p>
+            </div>
+          </div>
+        )}
       </aside>
 
-      <section className="stage">
-        <OcarinaStage getView={session.getView} />
-        <div className="stage-overlay">
-          {lesson?.state === 'countin' && <div className="feedback">{lesson.countIn}</div>}
-          {replaying && <div className="oc-stage-tag">Replay</div>}
-          {!audioReady && (
-            <button className="btn primary oc-sound" onClick={() => session.enableAudio()}>
-              Enable sound
-            </button>
-          )}
-          {!replaying && !tracked.left && !tracked.right && (
-            <div className="hint">{kind ? `Show your hands to play. (${status.message})` : 'Choose a hand input (Rokoko Smartgloves recommended) to play.'}</div>
-          )}
-          <WebcamPreview />
-          <PipelineStrip dofOverride={replaying ? session.replayDof : undefined} />
-        </div>
-      </section>
+      <div className="oc-top-actions">
+        {!audioReady && (
+          <button className="btn primary oc-sound" onClick={() => session.enableAudio()}>
+            Enable sound
+          </button>
+        )}
+        {replaying && <div className="oc-stage-tag">Replay</div>}
+        <WebcamPreview />
+      </div>
+
+      <div className="stage-overlay">
+        {lesson?.state === 'countin' && <div className="feedback">{lesson.countIn}</div>}
+        {!replaying && !tracked.left && !tracked.right && (
+          <div className="hint">{kind ? `Show your hands to play. (${status.message})` : 'Choose a hand input (Rokoko Smartgloves recommended) to play.'}</div>
+        )}
+        <PipelineStrip dofOverride={replaying ? session.replayDof : undefined} />
+      </div>
+
       {calibrating && <CalibrationWizard onClose={() => setCalibrating(false)} />}
     </div>
   );
