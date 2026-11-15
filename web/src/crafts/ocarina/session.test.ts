@@ -15,8 +15,25 @@ const mocks = vi.hoisted(() => {
     overrideCalls: [] as (null | 'fn')[],
     contexts: [] as string[],
     synth,
+    /** Whether the fake mic hears the real ocarina. */
+    mic: { sounding: true },
   };
 });
+
+// The real ocarina is heard through a fake mic (no getUserMedia here).
+vi.mock('./ocarinaMic', () => ({
+  useListenPrefs: { getState: () => ({ sensitivity: 0.5, minDb: -55 }), subscribe: () => () => {} },
+  OcarinaMic: class {
+    detector = { sensitivity: 0.5, minDb: -55 };
+    status = 'on';
+    last = null;
+    onStatus = () => {};
+    start = async () => {};
+    stop = () => {};
+    resume = () => {};
+    read = () => ({ sounding: mocks.mic.sounding, strength: 1, midi: null, peakDb: -30, floorDb: -90, thresholdDb: -55 });
+  },
+}));
 
 vi.mock('../../input/pipeline', () => ({
   live: mocks.live,
@@ -69,6 +86,7 @@ beforeEach(() => {
   mocks.overrideCalls.length = 0;
   mocks.contexts.length = 0;
   mocks.synth.notes.length = 0;
+  mocks.mic.sounding = true;
   useOcarinaUi.setState(useOcarinaUi.getInitialState(), true);
 });
 
@@ -83,15 +101,27 @@ describe('OcarinaSession live', () => {
     expect(mocks.synth.notes.at(-1)).toBeNull();
   });
 
-  it('plays the standard scale from finger flexion', () => {
+  it('plays the standard scale from finger flexion while the real ocarina is heard', () => {
     const s = new OcarinaSession();
     const expected = [72, 74, 76, 77, 79, 81, 83, 84, 86, 88, null];
     expected.forEach((midi, open) => {
       setLive(dofFor(open));
       s.tick(16);
       expect(s.getView().midi).toBe(midi);
-      expect(mocks.synth.notes.at(-1)).toBe(midi);
+      // The real instrument is the sound: the synth stays quiet live.
+      expect(mocks.synth.notes.at(-1)).toBeNull();
     });
+  });
+
+  it('is silent while the mic does not hear the real ocarina', () => {
+    const s = new OcarinaSession();
+    mocks.mic.sounding = false;
+    setLive(dofFor(3));
+    s.tick(16);
+    expect(s.getView().midi).toBeNull();
+    mocks.mic.sounding = true;
+    s.tick(16);
+    expect(s.getView().midi).toBe(77);
   });
 
   it('publishes note and hole changes to the UI store', () => {
@@ -186,7 +216,8 @@ describe('OcarinaSession recording and replay', () => {
     expect(s.replaying).toBe(false);
     expect(mocks.override).toBeNull();
     expect(useOcarinaUi.getState().replaying).toBeNull();
-    expect(mocks.synth.notes.slice(-2)).toEqual([null, 88]);
+    expect(mocks.synth.notes.slice(-2)).toEqual([null, null]); // live, the synth stays quiet (the real ocarina sounds)
+    expect(s.getView().midi).toBe(88);
 
     // Back to live input.
     s.tick(16);
@@ -326,6 +357,7 @@ describe('OcarinaSession lifecycle', () => {
     // 3 s count-in (4 beats at 80 bpm): unclamped, 5 s would have finished it.
     expect(useOcarinaUi.getState().lesson).toMatchObject({ state: 'countin', countIn: 4 });
 
+    s.setMode('free');
     setLive(dofFor(0));
     s.startRecording();
     s.tick(16);
@@ -448,5 +480,35 @@ describe('OcarinaSession playback controls', () => {
     expect(useOcarinaUi.getState().replayPaused).toBe(false);
     s.tick(30);
     expect(s.replayTime).toBe(30);
+  });
+});
+
+describe('OcarinaSession recording is free play only', () => {
+  it('refuses to record in lesson mode', () => {
+    const s = new OcarinaSession();
+    s.setMode('lesson');
+    s.startRecording();
+    s.startRecordingCountdown();
+    expect(useOcarinaUi.getState().recording).toBe(false);
+    expect(useOcarinaUi.getState().recCountdown).toBeNull();
+  });
+
+  it('entering a lesson stops a recording (keeping the take) and cancels a count-in', () => {
+    const s = new OcarinaSession();
+    setLive(dofFor(2));
+    s.startRecording();
+    s.tick(16);
+    s.tick(16);
+    s.startLesson('scale', false);
+    expect(useOcarinaUi.getState().recording).toBe(false);
+    expect(s.getTakes()).toHaveLength(1);
+
+    s.setMode('free');
+    s.startRecordingCountdown();
+    expect(useOcarinaUi.getState().recCountdown).not.toBeNull();
+    s.setMode('lesson');
+    expect(useOcarinaUi.getState().recCountdown).toBeNull();
+    s.tick(5000);
+    expect(useOcarinaUi.getState().recording).toBe(false);
   });
 });

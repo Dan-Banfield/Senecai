@@ -15,6 +15,7 @@ import { noteIndexAt, takeNoteEvents } from '../crafts/ocarina/market/lessonSong
 import { MarketModal } from '../crafts/ocarina/market/MarketModal';
 import { previewPlayer } from '../crafts/ocarina/market/preview';
 import { ARTIST_MAX, TITLE_MAX } from '../crafts/ocarina/market/types';
+import { MIN_DB_RANGE, useListenPrefs } from '../crafts/ocarina/ocarinaMic';
 import { OcarinaStage } from '../crafts/ocarina/OcarinaStage';
 import { cropTake, MIN_CROP_MS } from '../crafts/ocarina/recording';
 import { OcarinaSession, useOcarinaUi } from '../crafts/ocarina/session';
@@ -27,19 +28,6 @@ import { HOLES } from '../crafts/ocarina/types';
 import { useInputDemand, usePipeline } from '../input/pipeline';
 import { Icon } from '../ui/icons';
 import { WebcamPreview } from '../ui/WebcamPreview';
-
-function FreePlay() {
-  const noteName = useOcarinaUi((s) => s.noteName);
-  const holes = useOcarinaUi((s) => s.holes);
-  return (
-    <div className="card">
-      <h3>Free play</h3>
-      <p>All holes covered is C5; lift right little, ring, middle, index, then the left hand, then the thumbs to climb the scale. Lift everything to stop.</p>
-      <div className="oc-note">{noteName ?? '—'}</div>
-      <FingeringDiagram holes={holes} />
-    </div>
-  );
-}
 
 function LessonPanel({ session }: { session: OcarinaSession }) {
   const holes = useOcarinaUi((s) => s.holes);
@@ -167,6 +155,107 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
         </div>
       )}
     </>
+  );
+}
+
+/** Meter scale for the mic level (dBFS). */
+const METER_MIN_DB = -100;
+const METER_MAX_DB = -10;
+const meterPct = (db: number) => `${Math.min(100, Math.max(0, ((db - METER_MIN_DB) / (METER_MAX_DB - METER_MIN_DB)) * 100))}%`;
+
+const MIC_TEXT = {
+  off: '',
+  starting: 'Waiting for microphone permission…',
+  on: '',
+  denied: 'Microphone blocked. Allow it in the address bar, then press Retry.',
+  error: 'No microphone available.',
+} as const;
+
+/** Free play: you play your real ocarina; the mic says when it sounds, the fingers pick the note. */
+function FreePlay({ session }: { session: OcarinaSession }) {
+  const noteName = useOcarinaUi((s) => s.noteName);
+  const holes = useOcarinaUi((s) => s.holes);
+  const sensitivity = useListenPrefs((s) => s.sensitivity);
+  const minDb = useListenPrefs((s) => s.minDb);
+  const mic = useOcarinaUi((s) => s.mic);
+  const heard = useOcarinaUi((s) => s.heardMidi);
+  const audioReady = useOcarinaUi((s) => s.audioReady);
+  const levelRef = useRef<HTMLDivElement>(null);
+  const markRef = useRef<HTMLDivElement>(null);
+
+  // The level changes every frame: write it straight to the DOM instead of re-rendering.
+  useEffect(() => {
+    if (mic !== 'on') return;
+    let raf = 0;
+    const loop = () => {
+      raf = requestAnimationFrame(loop);
+      const r = session.toneReading();
+      if (levelRef.current) {
+        levelRef.current.style.width = r ? meterPct(r.peakDb) : '0%';
+        levelRef.current.parentElement?.classList.toggle('copper', !!r?.sounding);
+      }
+      if (markRef.current) markRef.current.style.left = r ? meterPct(r.thresholdDb) : '0%';
+    };
+    raf = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(raf);
+  }, [mic, session]);
+
+  const status =
+    mic === 'on'
+      ? !audioReady
+        ? 'Click anywhere to start the microphone.'
+        : heard !== null
+          ? `Hearing ${midiToName(heard)}`
+          : 'Blow into your ocarina to play.'
+      : MIC_TEXT[mic];
+
+  return (
+    <div className="card">
+      <h3>Free play</h3>
+      <p>Play your own ocarina: notes sound (and record) only while the microphone hears it. All holes covered is C5; lift right little, ring, middle, index, then the left hand, then the thumbs to climb the scale.</p>
+      <div className="oc-note">{noteName ?? '—'}</div>
+      <FingeringDiagram holes={holes} />
+      <div className="oc-lib-row">
+        <span className="grow">{status}</span>
+        {(mic === 'denied' || mic === 'error') && (
+          <button type="button" className="btn small" onClick={() => session.retryMic()}>
+            Retry
+          </button>
+        )}
+      </div>
+      {mic === 'on' && (
+        <>
+          <div className="meter oc-listen-meter" title="Mic level; the mark is the trigger level">
+            <div ref={levelRef} style={{ width: '0%', transition: 'none' }} />
+            <span ref={markRef} className="oc-listen-mark" />
+          </div>
+          <label className="field" style={{ marginTop: 10 }}>
+            <span>Sensitivity</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={sensitivity}
+              onChange={(e) => useListenPrefs.getState().setSensitivity(Number(e.target.value))}
+            />
+          </label>
+          <label className="field" style={{ marginTop: 10 }} title="Sounds quieter than this are never heard as a note">
+            <span>
+              Minimum level <span className="mono">{minDb} dB</span>
+            </span>
+            <input
+              type="range"
+              min={MIN_DB_RANGE.min}
+              max={MIN_DB_RANGE.max}
+              step={1}
+              value={minDb}
+              onChange={(e) => useListenPrefs.getState().setMinDb(Number(e.target.value))}
+            />
+          </label>
+        </>
+      )}
+    </div>
   );
 }
 
@@ -342,13 +431,12 @@ function CropEditor({ session, takeId, durationMs, onDone, onCancel }: {
   );
 }
 
-/** Voice-recorder style strip: record button + timer, sound and robot toggles, then the take list. */
+/** Voice-recorder style strip: record button + timer, robot toggle, then the take list. */
 function Recorder({ session }: { session: OcarinaSession }) {
   const recording = useOcarinaUi((s) => s.recording);
   const countdown = useOcarinaUi((s) => s.recCountdown);
   const takes = useOcarinaUi((s) => s.takes);
   const replaying = useOcarinaUi((s) => s.replaying);
-  const muted = useOcarinaUi((s) => s.muted);
   const mirror = usePipeline((s) => s.settings.mirrorRobot);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => performance.now());
@@ -400,16 +488,6 @@ function Recorder({ session }: { session: OcarinaSession }) {
         </button>
         <span className={`oc-rec-time mono${recording ? ' live' : ''}`}>{fmtTime(elapsed)}</span>
         <div className="spacer" />
-        <button
-          type="button"
-          className={`oc-icon-btn${muted ? ' off' : ''}`}
-          aria-label={muted ? 'Unmute' : 'Mute'}
-          aria-pressed={muted}
-          title={muted ? 'Unmute' : 'Mute'}
-          onClick={() => session.setMuted(!muted)}
-        >
-          <Icon name={muted ? 'mute' : 'volume'} />
-        </button>
         <button
           type="button"
           className={`oc-icon-btn${mirror ? ' active' : ' off'}`}
@@ -540,6 +618,7 @@ export default function OcarinaPage() {
   const replaying = useOcarinaUi((s) => s.replaying);
   const lesson = useOcarinaUi((s) => s.lesson);
   const recCountdown = useOcarinaUi((s) => s.recCountdown);
+  const mic = useOcarinaUi((s) => s.mic);
   const kind = usePipeline((s) => s.kind);
   const status = usePipeline((s) => s.status);
   const [hudOpen, setHudOpen] = useState(true);
@@ -608,9 +687,9 @@ export default function OcarinaPage() {
               </button>
             </div>
 
-            {mode === 'free' ? <FreePlay /> : <LessonPanel session={session} />}
+            {mode === 'free' ? <FreePlay session={session} /> : <LessonPanel session={session} />}
 
-            <Recorder session={session} />
+            {mode === 'free' && <Recorder session={session} />}
           </div>
         )}
       </aside>
@@ -650,6 +729,7 @@ export default function OcarinaPage() {
             <small>Recording starts…</small>
           </div>
         )}
+        {!replaying && (mic === 'denied' || mic === 'error') && <div className="hint">{MIC_TEXT[mic]}</div>}
         {!replaying && !tracked.left && !tracked.right && (
           <div className="hint">{kind ? `Show your hands to play. (${status.message})` : 'Choose a hand input (Rokoko Smartgloves recommended) to play.'}</div>
         )}

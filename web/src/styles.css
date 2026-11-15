@@ -985,3 +985,7 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
   .oc-hud:not(.collapsed) ~ .oc-top-actions { bottom: 150px; }
   .app.craft .oc-page .hint { bottom: 150px; }
 }
+
+/* Ocarina: real-ocarina mic level */
+.oc-listen-meter { position: relative; margin-top: 8px; overflow: visible; }
+.oc-listen-mark { position: absolute; top: -3px; bottom: -3px; width: 2px; margin-left: -1px; background: var(--birch); border-radius: 1px; pointer-events: none; }

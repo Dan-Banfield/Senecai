@@ -31,6 +31,7 @@ export function PlaybackBar({ session }: { session: OcarinaSession }) {
   const durationMs = useOcarinaUi((s) => s.replayDurationMs);
   const paused = useOcarinaUi((s) => s.replayPaused);
   const recording = useOcarinaUi((s) => s.recording);
+  const muted = useOcarinaUi((s) => s.muted);
   const speed = useLessonPrefs((s) => s.speed);
   const setSpeed = useLessonPrefs((s) => s.setSpeed);
   const sel = useSelectedSong();
@@ -127,6 +128,17 @@ export function PlaybackBar({ session }: { session: OcarinaSession }) {
           <span className="mono">{fmtClock(shownTotal)}</span>
         </div>
       </div>
+
+      <button
+        type="button"
+        className={`oc-icon-btn${muted ? ' off' : ''}`}
+        aria-label={muted ? 'Unmute playback' : 'Mute playback'}
+        aria-pressed={muted}
+        title={muted ? 'Unmute playback' : 'Mute playback'}
+        onClick={() => session.setMuted(!muted)}
+      >
+        <Icon name={muted ? 'mute' : 'volume'} size={16} />
+      </button>
 
       <label className="oc-playback-speed" title="Speed of playback and lessons">
         <select aria-label="Speed" value={speed} onChange={(e) => setSpeed(Number(e.target.value))}>

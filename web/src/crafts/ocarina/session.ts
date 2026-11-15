@@ -19,6 +19,7 @@ import { createSynth } from './audio';
 import { HoleTracker, midiToName, pitchOf } from './fingering';
 import { thresholdsFrom, useHoleCalibration } from './holeCalibration';
 import { Lesson, type NoteResult } from './lesson';
+import { OcarinaMic, useListenPrefs, type MicStatus } from './ocarinaMic';
 import { cropTake, TakePlayer, TakeRecorder } from './recording';
 import { SONGS } from './songs';
 import { HOLES, type HoleStates, type OcarinaSynth, type OcarinaView, type Song, type Take, type TakeFrame } from './types';
@@ -67,6 +68,10 @@ export interface OcarinaUi {
   muted: boolean;
   /** Whether the browser has let audio start (it needs a click or key press first). */
   audioReady: boolean;
+  /** Microphone state for "listen to my ocarina" ('off' when not listening). */
+  mic: MicStatus;
+  /** Note heard from the real ocarina while listening, null when it is silent. */
+  heardMidi: number | null;
 }
 
 const initialUi = (): OcarinaUi => ({
@@ -85,6 +90,8 @@ const initialUi = (): OcarinaUi => ({
   replayPaused: false,
   muted: false,
   audioReady: false,
+  mic: 'off',
+  heardMidi: null,
 });
 
 export const useOcarinaUi = create<OcarinaUi>(initialUi);
@@ -101,6 +108,8 @@ const sameHoles = (a: HoleStates, b: HoleStates) => a.length === b.length && a.e
 
 export class OcarinaSession {
   private readonly tracker = new HoleTracker();
+  /** Listens for the real ocarina: live notes sound only while it is heard. */
+  private readonly mic = new OcarinaMic();
   private readonly recorder = new TakeRecorder();
   private synth: OcarinaSynth = createSynth();
   private synthDisposed = false;
@@ -121,6 +130,7 @@ export class OcarinaSession {
   /** Session clock time at which an armed recording starts; null when not counting in. */
   private recordAt: number | null = null;
   private lastUiAt = -Infinity;
+  private heardMidi: number | null = null;
   private raf = 0;
   private active = false;
   private unsubs: (() => void)[] = [];
@@ -133,6 +143,10 @@ export class OcarinaSession {
     this.applyHoleCalibration();
     this.unsubs = [
       useHoleCalibration.subscribe(() => this.applyHoleCalibration()),
+      useListenPrefs.subscribe((s) => {
+        this.mic.detector.sensitivity = s.sensitivity;
+        this.mic.detector.minDb = s.minDb;
+      }),
       usePipeline.subscribe((s, prev) => {
         if (s.kind !== prev.kind) this.applyHoleCalibration();
         // The hole calibration is measured in the hand calibration's units: redoing that invalidates it.
@@ -147,6 +161,10 @@ export class OcarinaSession {
       this.synthDisposed = false;
     }
     this.synth.setMuted(this.muted);
+    this.mic.onStatus = (mic) => useOcarinaUi.setState({ mic, heardMidi: null });
+    this.mic.detector.sensitivity = useListenPrefs.getState().sensitivity;
+    this.mic.detector.minDb = useListenPrefs.getState().minDb;
+    void this.mic.start();
     window.addEventListener('pointerdown', this.unlock, true);
     window.addEventListener('keydown', this.unlock, true);
     // Start audio now: arriving from the globe, the click that got us here already counts as a
@@ -174,12 +192,25 @@ export class OcarinaSession {
     this.cancelRecordingCountdown();
     if (this.recorder.recording) this.stopRecording();
     this.endReplay();
+    this.mic.stop();
     this.synth.dispose();
     this.synthDisposed = true;
     usePipeline.getState().setCalibrationContext('default');
   }
 
-  private readonly unlock = (): void => this.synth.unlock();
+  private readonly unlock = (): void => {
+    this.synth.unlock();
+    this.mic.resume();
+  };
+
+  /** Ask for the microphone again (after it was blocked or failed). Call from a user gesture. */
+  retryMic(): void {
+    this.mic.stop();
+    void this.mic.start();
+  }
+
+  /** Last microphone reading (for a level meter), null when not listening. */
+  readonly toneReading = () => this.mic.last;
 
   /** Use the saved hole calibration for the current input source (defaults when there is none). */
   private applyHoleCalibration(): void {
@@ -247,8 +278,13 @@ export class OcarinaSession {
       } else delete view.dof[side];
     }
     view.holes = this.tracker.update(view.dof);
-    view.midi = tracked ? pitchOf(view.holes) : null;
-    this.synth.setNote(view.midi);
+    // The fingers pick the note, the real ocarina (heard by the mic) says when it sounds. The synth
+    // stays quiet live: you hear the real instrument, and the mic would otherwise hear the synth and
+    // hold itself on. It only voices replays.
+    const tone = this.mic.read(dt);
+    view.midi = tracked && tone?.sounding ? pitchOf(view.holes) : null;
+    this.synth.setNote(null);
+    this.heardMidi = tone?.midi ?? null;
 
     if (this.lesson) this.lesson.tick(dt, view.midi);
     if (this.recorder.recording) {
@@ -266,6 +302,7 @@ export class OcarinaSession {
     if (mode === this.mode) return;
     this.mode = mode;
     if (mode === 'free') this.lesson = null;
+    else this.endRecordingForLesson();
     useOcarinaUi.setState({ mode, lesson: this.lessonUi() });
   }
 
@@ -279,6 +316,7 @@ export class OcarinaSession {
     if (!song) throw new Error(`Unknown song: ${String(songOrId)}`);
     if (!song.notes.length) throw new Error(`Song has no notes: ${song.id}`);
     this.mode = 'lesson';
+    this.endRecordingForLesson();
     this.lesson = new Lesson(speed === 1 ? song : { ...song, bpm: song.bpm * speed }, { wait });
     useOcarinaUi.setState({ mode: 'lesson', lesson: this.lessonUi() });
   }
@@ -295,16 +333,23 @@ export class OcarinaSession {
     return l.events[l.current]?.midi ?? null;
   }
 
+  /** Recording is a free-play feature: entering lesson mode cancels a count-in and keeps what was recorded. */
+  private endRecordingForLesson(): void {
+    this.cancelRecordingCountdown();
+    if (this.recorder.recording) this.stopRecording();
+  }
+
+  /** Refused while replaying, already recording, or in lesson mode. */
   startRecording(): void {
-    if (this.player || this.recorder.recording) return;
+    if (this.player || this.recorder.recording || this.mode === 'lesson') return;
     this.recordAt = null;
     this.recorder.start(this.clock);
     useOcarinaUi.setState({ recording: true, recCountdown: null });
   }
 
-  /** Counts in for `ms` (3 s by default), then starts recording. Refused while replaying or recording. */
+  /** Counts in for `ms` (3 s by default), then starts recording. Refused while replaying, recording or in lesson mode. */
   startRecordingCountdown(ms = RECORD_COUNT_IN_MS): void {
-    if (this.player || this.recorder.recording || this.recordAt !== null) return;
+    if (this.player || this.recorder.recording || this.recordAt !== null || this.mode === 'lesson') return;
     this.recordAt = this.clock + ms;
     useOcarinaUi.setState({ recCountdown: Math.ceil(ms / 1000) });
   }
@@ -446,8 +491,9 @@ export class OcarinaSession {
     if (this.synth.ready !== ui.audioReady) patch.audioReady = this.synth.ready;
     const countdown = this.recordAt === null ? null : Math.max(1, Math.ceil((this.recordAt - this.clock) / 1000));
     if (countdown !== ui.recCountdown) patch.recCountdown = countdown;
-    if ((v.midi !== ui.midi || !sameHoles(v.holes, ui.holes)) && this.clock - this.lastUiAt >= UI_INTERVAL_MS) {
+    if ((v.midi !== ui.midi || !sameHoles(v.holes, ui.holes) || this.heardMidi !== ui.heardMidi) && this.clock - this.lastUiAt >= UI_INTERVAL_MS) {
       this.lastUiAt = this.clock;
+      patch.heardMidi = this.heardMidi;
       patch.midi = v.midi;
       patch.noteName = v.midi === null ? null : midiToName(v.midi);
       patch.holes = [...v.holes];
