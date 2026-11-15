@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Dof6 } from '../../robot/retarget';
 import { toInspireAngles } from '../../robot/retarget';
 import { HoleTracker, pitchOf } from './fingering';
-import { sampleTake, TakePlayer, TakeRecorder } from './recording';
+import { cropTake, MIN_CROP_MS, sampleTake, TakePlayer, TakeRecorder } from './recording';
 import type { Take, TakeFrame } from './types';
 
 /** A wobbly synthetic performance: fingers sweep through the hysteresis band at different rates. */
@@ -125,5 +125,25 @@ describe('sampleTake', () => {
     expect(p.done).toBe(false);
     expect(p.tick(1)).toBe(take.frames[3]);
     expect(p.done).toBe(true);
+  });
+});
+
+describe('cropTake', () => {
+  it('keeps the selected span, re-timed from 0, looking exactly like the original', () => {
+    const { take } = recordSynthetic(300); // 3600 ms
+    const crop = cropTake(take, 1005, 2500);
+    expect(crop.id).not.toBe(take.id);
+    expect(crop.name).toBe(take.name);
+    expect(crop.durationMs).toBe(1495);
+    expect(crop.frames[0].t).toBe(0);
+    for (const t of [0, 1, 7, 500, 1000, 1495]) expect(sampleTake(crop, t)).toEqual({ ...sampleTake(take, t + 1005)!, t: sampleTake(crop, t)!.t });
+    expect(crop.frames.every((f, i) => i === 0 || f.t >= crop.frames[i - 1].t)).toBe(true);
+    expect(take.frames).toHaveLength(300); // original untouched
+  });
+
+  it('clamps to the take and never leaves less than the minimum', () => {
+    const { take } = recordSynthetic(100); // 1200 ms
+    expect(cropTake(take, -50, 99999).durationMs).toBe(take.durationMs);
+    expect(cropTake(take, 600, 600).durationMs).toBe(MIN_CROP_MS);
   });
 });

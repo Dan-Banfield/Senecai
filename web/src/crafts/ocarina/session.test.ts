@@ -344,6 +344,42 @@ describe('OcarinaSession lifecycle', () => {
   });
 });
 
+describe('OcarinaSession recording count-in and crop', () => {
+  it('counts in for 3 s before recording, and can be cancelled', () => {
+    const s = new OcarinaSession();
+    setLive(dofFor(0));
+    s.startRecordingCountdown();
+    expect(useOcarinaUi.getState().recCountdown).toBe(3);
+    for (let i = 0; i < 15; i++) s.tick(100); // 1.5 s
+    expect(useOcarinaUi.getState()).toMatchObject({ recording: false, recCountdown: 2 });
+    for (let i = 0; i < 15; i++) s.tick(100); // 3 s
+    expect(useOcarinaUi.getState()).toMatchObject({ recording: true, recCountdown: null });
+    s.tick(16);
+    expect(s.stopRecording()?.frames.length).toBeGreaterThan(0);
+
+    s.startRecordingCountdown();
+    s.tick(100);
+    s.cancelRecordingCountdown();
+    for (let i = 0; i < 40; i++) s.tick(100);
+    expect(useOcarinaUi.getState()).toMatchObject({ recording: false, recCountdown: null });
+  });
+
+  it('crops a take in place under a new id', () => {
+    const s = new OcarinaSession();
+    s.startRecording();
+    for (let i = 0; i < 20; i++) {
+      setLive(dofFor(i < 10 ? 0 : 3));
+      s.tick(50);
+    }
+    const take = s.stopRecording()!;
+    const cropped = s.cropTake(take.id, 500, 900)!;
+    expect(cropped.durationMs).toBe(400);
+    expect(s.getTakes().map((t) => t.id)).toEqual([cropped.id]);
+    expect(useOcarinaUi.getState().takes).toEqual([{ id: cropped.id, name: take.name, durationMs: 400 }]);
+    expect(s.cropTake('nope', 0, 100)).toBeNull();
+  });
+});
+
 describe('OcarinaSession hole calibration', () => {
   it('applies the saved calibration for the current source, live', () => {
     vi.stubGlobal('window', new EventTarget());

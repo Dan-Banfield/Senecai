@@ -61,6 +61,30 @@ export class TakeRecorder {
   }
 }
 
+/** Shortest take a crop can leave. */
+export const MIN_CROP_MS = 200;
+
+/**
+ * The part of `take` between `startMs` and `endMs`, re-timed to start at 0.
+ * The pose held at `startMs` (the latest earlier frame) opens the crop, so it
+ * starts exactly as the original looked at that moment. Gets a fresh id.
+ */
+export function cropTake(take: Take, startMs: number, endMs: number): Take {
+  const start = Math.max(0, Math.min(startMs, take.durationMs));
+  const end = Math.max(start + MIN_CROP_MS, Math.min(endMs, take.durationMs));
+  const frames: TakeFrame[] = [];
+  const opening = sampleTake(take, start);
+  if (opening && opening.t < start) frames.push({ ...opening, t: 0 });
+  for (const f of take.frames) if (f.t >= start && f.t <= end) frames.push({ ...f, t: f.t - start });
+  return {
+    id: `take-${Date.now().toString(36)}-${++takeSeq}`,
+    name: take.name,
+    createdAt: Date.now(),
+    durationMs: end - start,
+    frames,
+  };
+}
+
 /** Latest frame at or before `t`; undefined before the first frame. */
 export function sampleTake(take: Take, t: number): TakeFrame | undefined {
   const f = take.frames;

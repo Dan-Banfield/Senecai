@@ -19,7 +19,7 @@ import { createSynth } from './audio';
 import { HoleTracker, midiToName, pitchOf } from './fingering';
 import { thresholdsFrom, useHoleCalibration } from './holeCalibration';
 import { Lesson, type NoteResult } from './lesson';
-import { TakePlayer, TakeRecorder } from './recording';
+import { cropTake, TakePlayer, TakeRecorder } from './recording';
 import { SONGS } from './songs';
 import { HOLES, type HoleStates, type OcarinaSynth, type OcarinaView, type Song, type Take, type TakeFrame } from './types';
 
@@ -53,6 +53,8 @@ export interface OcarinaUi {
   tracked: Record<Side, boolean>;
   lesson: OcarinaLessonUi | null;
   recording: boolean;
+  /** Whole seconds left in the count-in before recording starts; null when not counting in. */
+  recCountdown: number | null;
   takes: TakeMeta[];
   /** Id of the take (or market song) being replayed, if any. */
   replaying: string | null;
@@ -75,6 +77,7 @@ const initialUi = (): OcarinaUi => ({
   tracked: { left: false, right: false },
   lesson: null,
   recording: false,
+  recCountdown: null,
   takes: [],
   replaying: null,
   replayingName: null,
@@ -87,6 +90,8 @@ const initialUi = (): OcarinaUi => ({
 export const useOcarinaUi = create<OcarinaUi>(initialUi);
 
 const SIDES: readonly Side[] = ['left', 'right'];
+/** Count-in before a recording starts. */
+export const RECORD_COUNT_IN_MS = 3000;
 /** Longest step tick() will take (a backgrounded tab must not fast-forward a lesson). */
 export const MAX_DT_MS = 100;
 /** Minimum gap between note/hole UI updates (~15 Hz). */
@@ -113,6 +118,8 @@ export class OcarinaSession {
   private takes: Take[] = [];
   /** Session clock (sum of clamped dt), used to stamp recorded frames. */
   private clock = 0;
+  /** Session clock time at which an armed recording starts; null when not counting in. */
+  private recordAt: number | null = null;
   private lastUiAt = -Infinity;
   private raf = 0;
   private active = false;
@@ -164,6 +171,7 @@ export class OcarinaSession {
     this.unsubs = [];
     window.removeEventListener('pointerdown', this.unlock, true);
     window.removeEventListener('keydown', this.unlock, true);
+    this.cancelRecordingCountdown();
     if (this.recorder.recording) this.stopRecording();
     this.endReplay();
     this.synth.dispose();
@@ -205,6 +213,10 @@ export class OcarinaSession {
   tick(dtMs: number): void {
     const dt = Math.min(MAX_DT_MS, Math.max(0, Number.isFinite(dtMs) ? dtMs : 0));
     this.clock += dt;
+    if (this.recordAt !== null && this.clock >= this.recordAt) {
+      this.recordAt = null;
+      this.startRecording();
+    }
     const view = this.view;
 
     if (this.player) {
@@ -285,8 +297,36 @@ export class OcarinaSession {
 
   startRecording(): void {
     if (this.player || this.recorder.recording) return;
+    this.recordAt = null;
     this.recorder.start(this.clock);
-    useOcarinaUi.setState({ recording: true });
+    useOcarinaUi.setState({ recording: true, recCountdown: null });
+  }
+
+  /** Counts in for `ms` (3 s by default), then starts recording. Refused while replaying or recording. */
+  startRecordingCountdown(ms = RECORD_COUNT_IN_MS): void {
+    if (this.player || this.recorder.recording || this.recordAt !== null) return;
+    this.recordAt = this.clock + ms;
+    useOcarinaUi.setState({ recCountdown: Math.ceil(ms / 1000) });
+  }
+
+  cancelRecordingCountdown(): void {
+    if (this.recordAt === null) return;
+    this.recordAt = null;
+    useOcarinaUi.setState({ recCountdown: null });
+  }
+
+  /**
+   * Keeps only `startMs..endMs` of a take (see cropTake). The cropped take
+   * replaces the original in the list, under a new id.
+   */
+  cropTake(id: string, startMs: number, endMs: number): Take | null {
+    const i = this.takes.findIndex((t) => t.id === id);
+    if (i < 0) return null;
+    if (this.replayId === id) this.endReplay();
+    const cropped = cropTake(this.takes[i], startMs, endMs);
+    this.takes = this.takes.map((t, k) => (k === i ? cropped : t));
+    useOcarinaUi.setState({ takes: this.takeMetas() });
+    return cropped;
   }
 
   /** Ends recording; returns the new take (null when nothing was captured). */
@@ -310,6 +350,7 @@ export class OcarinaSession {
    */
   replayTake(take: Take, id: string): void {
     if (this.recorder.recording) return;
+    this.cancelRecordingCountdown();
     this.endReplay();
     if (this.lesson) this.stopLesson();
     this.player = new TakePlayer(take);
@@ -403,6 +444,8 @@ export class OcarinaSession {
       : { left: !!live.commands.left, right: !!live.commands.right };
     if (tracked.left !== ui.tracked.left || tracked.right !== ui.tracked.right) patch.tracked = tracked;
     if (this.synth.ready !== ui.audioReady) patch.audioReady = this.synth.ready;
+    const countdown = this.recordAt === null ? null : Math.max(1, Math.ceil((this.recordAt - this.clock) / 1000));
+    if (countdown !== ui.recCountdown) patch.recCountdown = countdown;
     if ((v.midi !== ui.midi || !sameHoles(v.holes, ui.holes)) && this.clock - this.lastUiAt >= UI_INTERVAL_MS) {
       this.lastUiAt = this.clock;
       patch.midi = v.midi;
@@ -428,6 +471,7 @@ export class OcarinaSession {
       tracked: { left: !!v.dof.left, right: !!v.dof.right },
       lesson: this.lessonUi(),
       recording: this.recorder.recording,
+      recCountdown: null,
       takes: this.takeMetas(),
       replaying: this.replayId,
       replayingName: this.player?.take.name ?? null,

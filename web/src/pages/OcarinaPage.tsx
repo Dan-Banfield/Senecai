@@ -3,7 +3,7 @@
 // the holes. Free play, lessons, session-only takes with replay, and a song
 // market for publishing takes and replaying other players' songs.
 
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { useOcarinaCamera } from '../crafts/ocarina/cameraStore';
 import { cameraKeyStep, VIEW_LABEL, VIEW_ORDER } from '../crafts/ocarina/cameraViews';
 import { fingeringFor, midiToName } from '../crafts/ocarina/fingering';
@@ -16,6 +16,7 @@ import { MarketModal } from '../crafts/ocarina/market/MarketModal';
 import { previewPlayer } from '../crafts/ocarina/market/preview';
 import { ARTIST_MAX, TITLE_MAX } from '../crafts/ocarina/market/types';
 import { OcarinaStage } from '../crafts/ocarina/OcarinaStage';
+import { cropTake, MIN_CROP_MS } from '../crafts/ocarina/recording';
 import { OcarinaSession, useOcarinaUi } from '../crafts/ocarina/session';
 import { LIB_PREFIX } from '../crafts/ocarina/lessonPrefs';
 import { PlaybackBar, WATCH_PREFIX } from '../crafts/ocarina/PlaybackBar';
@@ -249,9 +250,102 @@ function PublishForm({ session, takeId, takeName, onDone, onCancel }: {
   );
 }
 
+const CROP_PREVIEW_PREFIX = 'crop:';
+
+/** Inline editor under a take: drag the two handles to choose the part to keep, preview it, then crop. */
+function CropEditor({ session, takeId, durationMs, onDone, onCancel }: {
+  session: OcarinaSession;
+  takeId: string;
+  durationMs: number;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [start, setStart] = useState(0);
+  const [end, setEnd] = useState(durationMs);
+  const replaying = useOcarinaUi((s) => s.replaying);
+  const previewId = CROP_PREVIEW_PREFIX + takeId;
+  const previewing = replaying === previewId;
+  const pct = (ms: number) => `${(ms / Math.max(1, durationMs)) * 100}%`;
+  const unchanged = start <= 0 && end >= durationMs;
+  const ref = useRef<HTMLDivElement>(null);
+
+  // The take list scrolls inside the HUD: bring the editor into view when it opens.
+  // Braces matter: newer browsers return a Promise from scrollIntoView, and an effect must return only a cleanup function.
+  useEffect(() => {
+    ref.current?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, []);
+
+  // Stop a running preview when the editor closes.
+  useEffect(() => () => {
+    if (useOcarinaUi.getState().replaying === previewId) session.stopReplay();
+  }, [session, previewId]);
+
+  const preview = () => {
+    if (previewing) return session.stopReplay();
+    const take = session.getTakes().find((t) => t.id === takeId);
+    if (!take) return;
+    previewPlayer.stop();
+    session.replayTake(cropTake(take, start, end), previewId);
+  };
+
+  return (
+    <div className="oc-crop" ref={ref}>
+      <div className="oc-crop-range" style={{ ['--a' as string]: pct(start), ['--b' as string]: pct(end) }}>
+        <div className="oc-crop-track" />
+        <input
+          type="range"
+          min={0}
+          max={durationMs}
+          step={10}
+          value={start}
+          aria-label="Crop start"
+          onChange={(e) => setStart(Math.min(Number(e.target.value), end - MIN_CROP_MS))}
+        />
+        <input
+          type="range"
+          min={0}
+          max={durationMs}
+          step={10}
+          value={end}
+          aria-label="Crop end"
+          onChange={(e) => setEnd(Math.max(Number(e.target.value), start + MIN_CROP_MS))}
+        />
+      </div>
+      <div className="oc-crop-times mono">
+        <span>{fmtTime(start)}</span>
+        <span className="oc-crop-len">keep {fmtTime(end - start)}</span>
+        <span>{fmtTime(end)}</span>
+      </div>
+      <div className="row">
+        <button type="button" className="btn small" onClick={preview}>
+          <Icon name={previewing ? 'stop' : 'play'} size={14} />
+          {previewing ? 'Stop' : 'Preview'}
+        </button>
+        <span className="spacer" />
+        <button type="button" className="btn small ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn small primary"
+          disabled={unchanged}
+          onClick={() => {
+            if (previewing) session.stopReplay();
+            session.cropTake(takeId, start, end);
+            onDone();
+          }}
+        >
+          Crop
+        </button>
+      </div>
+    </div>
+  );
+}
+
 /** Voice-recorder style strip: record button + timer, sound and robot toggles, then the take list. */
 function Recorder({ session }: { session: OcarinaSession }) {
   const recording = useOcarinaUi((s) => s.recording);
+  const countdown = useOcarinaUi((s) => s.recCountdown);
   const takes = useOcarinaUi((s) => s.takes);
   const replaying = useOcarinaUi((s) => s.replaying);
   const muted = useOcarinaUi((s) => s.muted);
@@ -259,6 +353,7 @@ function Recorder({ session }: { session: OcarinaSession }) {
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => performance.now());
   const [publishing, setPublishing] = useState<string | null>(null);
+  const [cropping, setCropping] = useState<string | null>(null);
   const [published, setPublished] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
@@ -280,20 +375,28 @@ function Recorder({ session }: { session: OcarinaSession }) {
       <div className="oc-rec-bar">
         <button
           type="button"
-          className={`oc-rec-btn${recording ? ' on' : ''}`}
-          disabled={!!replaying}
-          aria-label={recording ? 'Stop recording' : 'Record a take'}
-          title={recording ? 'Stop recording' : 'Record a take (fingers, notes and robot commands; kept until you leave)'}
+          className={`oc-rec-btn${recording ? ' on' : ''}${countdown !== null ? ' counting' : ''}`}
+          disabled={!!replaying && countdown === null}
+          aria-label={recording ? 'Stop recording' : countdown !== null ? 'Cancel recording' : 'Record a take'}
+          title={
+            recording
+              ? 'Stop recording'
+              : countdown !== null
+                ? 'Cancel'
+                : 'Record a take after a 3 second count-in (fingers, notes and robot commands; kept until you leave)'
+          }
           onClick={() => {
             if (recording) {
               session.stopRecording();
+            } else if (countdown !== null) {
+              session.cancelRecordingCountdown();
             } else {
               previewPlayer.stop();
-              session.startRecording();
+              session.startRecordingCountdown();
             }
           }}
         >
-          <span />
+          {countdown !== null ? <b>{countdown}</b> : <span />}
         </button>
         <span className={`oc-rec-time mono${recording ? ' live' : ''}`}>{fmtTime(elapsed)}</span>
         <div className="spacer" />
@@ -354,11 +457,29 @@ function Recorder({ session }: { session: OcarinaSession }) {
                     aria-label={`Publish ${t.name} to the song market`}
                     aria-expanded={publishing === t.id}
                     title="Publish to the song market"
-                    onClick={() => setPublishing((cur) => (cur === t.id ? null : t.id))}
+                    onClick={() => {
+                      setCropping(null);
+                      setPublishing((cur) => (cur === t.id ? null : t.id));
+                    }}
                   >
                     <Icon name="upload" size={16} />
                   </button>
                 )}
+                <button
+                  type="button"
+                  className={`oc-icon-btn ghost${cropping === t.id ? ' on' : ''}`}
+                  disabled={recording || t.durationMs < MIN_CROP_MS * 2}
+                  aria-label={`Crop ${t.name}`}
+                  aria-expanded={cropping === t.id}
+                  title="Crop: keep only part of this take"
+                  onClick={() => {
+                    if (playing) session.stopReplay();
+                    setPublishing(null);
+                    setCropping((cur) => (cur === t.id ? null : t.id));
+                  }}
+                >
+                  <Icon name="scissors" size={16} />
+                </button>
                 <button
                   type="button"
                   className="oc-icon-btn ghost"
@@ -366,11 +487,21 @@ function Recorder({ session }: { session: OcarinaSession }) {
                   title="Delete"
                   onClick={() => {
                     if (publishing === t.id) setPublishing(null);
+                    if (cropping === t.id) setCropping(null);
                     session.deleteTake(t.id);
                   }}
                 >
                   <Icon name="trash" size={16} />
                 </button>
+                {cropping === t.id && (
+                  <CropEditor
+                    session={session}
+                    takeId={t.id}
+                    durationMs={t.durationMs}
+                    onCancel={() => setCropping(null)}
+                    onDone={() => setCropping(null)}
+                  />
+                )}
                 {publishing === t.id && (
                   <PublishForm
                     session={session}
@@ -408,6 +539,7 @@ export default function OcarinaPage() {
   const tracked = useOcarinaUi((s) => s.tracked);
   const replaying = useOcarinaUi((s) => s.replaying);
   const lesson = useOcarinaUi((s) => s.lesson);
+  const recCountdown = useOcarinaUi((s) => s.recCountdown);
   const kind = usePipeline((s) => s.kind);
   const status = usePipeline((s) => s.status);
   const [hudOpen, setHudOpen] = useState(true);
@@ -513,6 +645,12 @@ export default function OcarinaPage() {
 
       <div className="stage-overlay">
         {lesson?.state === 'countin' && <div className="feedback">{lesson.countIn}</div>}
+        {recCountdown !== null && (
+          <div className="oc-rec-countdown" aria-live="assertive">
+            <span key={recCountdown}>{recCountdown}</span>
+            <small>Recording starts…</small>
+          </div>
+        )}
         {!replaying && !tracked.left && !tracked.right && (
           <div className="hint">{kind ? `Show your hands to play. (${status.message})` : 'Choose a hand input (Rokoko Smartgloves recommended) to play.'}</div>
         )}
