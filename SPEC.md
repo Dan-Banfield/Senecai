@@ -1,67 +1,66 @@
-# Senecai — Page Redesign Specification (`GlobePage` Aesthetic Alignment)
+# Ocarina stage — switchable camera views
 
-## 1. Goal & Scope
+## Goal
 
-Redesign all non-globe application pages—specifically `OcarinaPage` (`/craft/ocarina`) and the surrounding app shell / shared HUD components as needed—to match the visual language, spatial layout, and interaction feel of `GlobePage` (`/`), while leaving all game, audio, input-pipeline, and 3D retargeting logic completely untouched.
+Let the player switch the ocarina stage camera (`/craft/ocarina`) between three fixed views, using the arrow keys or on-screen buttons. The camera glides smoothly between views, and the chosen view is remembered across reloads.
 
-### In Scope
-- **`OcarinaPage` (`/craft/ocarina`)**:
-  - Full-bleed 3D viewport stage (`100%` / `100vw` × `100vh`) matching `GlobePage`'s edge-to-edge canvas presentation and atmospheric dark/warm-earth palette.
-  - Floating, translucent HUD overlay panels (matching `GlobePage`'s glassmorphic / dark-translucent card & pill styling, typography, borders, and spacing) for ocarina controls, song/note HUD, fingering/hint display, and status indicators.
-  - Minimal floating top bar (consistent with `App.tsx` `.app.home` header treatment: floating over the canvas without pushing the viewport down, with Brand link back to `/`, `SearchBar`, and `SourcePill`).
-- **Shared HUD / Shell Components**:
-  - `App.tsx` / `styles.css`: Unify `.app` shell so `/craft/ocarina` uses the same full-bleed overlay header and viewport framing as `.app.home` (`GlobePage`).
-  - `InputPanel`, `PipelineStrip`, `SearchBar`, `WebcamPreview`, `SourcePill`: Ensure consistent floating/collapsible translucent overlay styling when rendered on `OcarinaPage` (and `GlobePage`), without regressing `GlobePage`.
-- **Responsiveness & Layering**:
-  - Clean `z-index` layering: full-bleed 3D canvas at base layer, floating HUD panels above canvas, `InputPanel` drawer / modals / search dropdowns cleanly layered on top without overlapping or clipping at desktop (`1280×800`, `1440×900`) and smaller viewports (`<= 768px`).
+## Views
 
-### Explicit Non-Goals
-- **No game or domain logic changes**: Do NOT alter ocarina pitch/note detection, Web Audio synth, song definitions/progression, scoring/accuracy logic, fingering tables, robot hand retargeting (`src/robot/*`), input sources (`src/input/*`), or Rokoko bridge logic (`bridge/*`, `src/rokoko/*`).
-- **No `GlobePage` functional changes**: `GlobePage` behavior, globe data, and camera/craft selection logic remain unchanged (any shared CSS token or component adjustments must preserve `GlobePage`'s current appearance and behavior).
-- **No new routes or new craft games**: Do not implement new craft pages beyond what currently exists in `App.tsx` routes.
+The instrument and hands are tipped together about X (`INSTRUMENT_TILT`, about −68°) so the finger holes face the Front camera head-on.
 
----
 
-## 2. Inputs, Outputs & Public Interfaces
+All views look at the existing `TARGET` (`OcarinaStage.tsx`, `(0, -0.15, 0.05)`). Each keeps the existing narrow-screen FOV fit: both hands (about 2.4 units across) stay in frame and FOV is never below 38°.
 
-### Routes & Pages
-- `/` → `GlobePage` (reference aesthetic & layout)
-- `/craft/ocarina` → `OcarinaPage` (redesign target)
+| id | Label | Description |
+|---|---|---|
+| `front` | Front | Faces the player from across the instrument, like an audience member, so both hands and the ocarina face are visible. Low elevation (about 15–25° above the table). |
+| `top` | Top | Angled top-down: high and in front (~60° up), looking down at the tilted hole face. The picture is rolled 180° so the mouthpiece points towards the viewer. |
+| `side` | Side | From the **player's right**, about 30° above the table, swung towards the front so the holes stay visible. |
 
-### Component & Hook Interfaces (Preserved)
-- `OcarinaPage` (`web/src/pages/OcarinaPage.tsx`): Default export React component; continues to consume existing ocarina state/hooks/audio/pipeline without changing their signatures or state semantics.
-- `App.tsx`: `Shell` continues to render `<Brand />` (on non-home routes), `<SearchBar />`, `<SourcePill />`, `<Routes>`, and `<InputPanel />`.
-- `InputPanel`, `PipelineStrip`, `SearchBar`, `WebcamPreview`: Existing props and store subscriptions (`usePipeline`, etc.) remain backward-compatible.
+Exact positions are tuned during implementation so that nothing important is clipped or hidden behind the hands. Each view's position lives in one constant table.
 
-### Visual & Layout Contract (Matching `GlobePage`)
-- **Viewport**: Full-bleed `100vw × 100vh` (`overflow: hidden`) with the 3D `<Canvas>` filling the entire viewport behind the HUD.
-- **Header**: Floating translucent/overlay top bar (`position: fixed` or `absolute` over the stage, `pointer-events: none` on the bar container with `pointer-events: auto` on interactive children), matching `GlobePage`.
-- **HUD Panels**: Translucent dark/glassmorphic surface tokens, subtle `1px` borders, consistent border radii, typography, and accent colors derived from `GlobePage` / `styles.css`.
-- **Collapsible/Floating Controls**: Input/pipeline/webcam controls and game HUD widgets float cleanly at screen edges/corners with collapsible or compact states so the 3D ocarina + robot hands remain the visual centerpiece.
+**Default** (first visit or invalid stored value): `top`.
 
----
+## Controls
 
-## 3. Edge Cases, Invariants & Error Handling
+### Keyboard
+- **Cycle order:** `front → top → side`, wrapping in both directions.
+- **→ (ArrowRight)** goes to the next view; **← (ArrowLeft)** goes to the previous one. Up and Down are not used.
+- **Conflict with the keyboard input source:** when `usePipeline` source kind is `keyboard`, plain arrows keep turning the wrist (unchanged), and the camera switches only on **Shift + ← / →**. With any other source, both plain arrows and Shift + arrows switch the camera.
+- Ignored when focus is in an `input`, `textarea`, `select` or contenteditable element (e.g. the header search), and on key repeat (`e.repeat`).
+- Active only while the ocarina page is mounted.
+- `preventDefault()` on handled keys so the page doesn't scroll.
 
-### Invariants
-1. **Pointer Events**: Overlay HUD containers must not block orbit/canvas pointer interactions in empty regions (`pointer-events: none` on full-screen overlay wrappers, `pointer-events: auto` on interactive panels/buttons).
-2. **Game Logic Isolation**: All unit tests for ocarina, robot retargeting, input pipeline, and globe geo must continue to pass without test modifications.
-3. **Audio / Input Lifecycle**: Unmounting or navigating between `/` and `/craft/ocarina` must preserve existing cleanup and input source restoration (`useRestoreSource`).
-4. **Canvas Resize**: Full-bleed 3D canvas must resize smoothly with the window without scrollbars (`overflow: hidden`) or stretched aspect ratios.
+### Buttons
+- A small 3-button pill (**Front · Top · Side**) overlaid on the 3D stage in a bottom corner. It sits outside the side HUD, so it stays visible when the HUD is collapsed.
+- The active view is highlighted. Buttons have `aria-pressed` and a title hint: `Shift+←/→` when the keyboard source is active, `←/→` otherwise.
+- Styled to match the existing ocarina HUD / globe pill look (existing CSS tokens). It must not overlap the HUD at desktop sizes, and it must still be reachable at widths ≤ 768px.
 
-### Edge Cases & Failure Modes
-- **Small viewports / narrow screens**: Floating HUD panels must not collide with the top header or cover the center 3D subject; panels should stack, compact, or collapse cleanly.
-- **Webcam / InputPanel open state**: Opening `InputPanel` or `WebcamPreview` must remain accessible above HUD overlays without clipping off-screen.
-- **Audio / WebGL fallback or loading states**: Suspense fallback (`Loading…`) and any audio-unlock prompt must match the dark full-bleed aesthetic rather than flashing unstyled/light backgrounds.
+## Transition
 
----
+- The camera eases from its current pose to the target view over **about 0.6 s** (ease-in-out). It interpolates position and look direction, so it never snaps or flips.
+- Switching again mid-glide starts a new glide from the current, mid-flight pose.
+- FOV is recomputed for the target view and eased along with it. On resize, the current view's framing is re-fit.
 
-## 4. Verification Criteria
+## Persistence
 
-All checks must pass from the repository after the final edit:
-1. **Typecheck**: `npm --prefix web run typecheck` (`tsc --noEmit`) exits `0` with zero errors.
-2. **Unit Tests**: `npm --prefix web run test` (`vitest run`) exits `0` with all existing tests passing and zero skipped/relaxed assertions.
-3. **Production Build**: `npm --prefix web run build` (`tsc --noEmit && vite build`) exits `0`.
-4. **Manual / Visual Sanity (if dev server is checked)**:
-   - `/` (`GlobePage`) renders identically to before.
-   - `/craft/ocarina` (`OcarinaPage`) renders full-bleed 3D stage with floating translucent HUD panels, floating top bar, and intact ocarina playability/controls.
+- The chosen view id is stored in a small persisted zustand store (same pattern as `usePipeline`'s `persist`), under its own storage key. It is restored on load.
+- Unknown stored values fall back to `top`.
+
+## Non-goals
+
+- No free orbit, zoom or mouse-drag camera.
+- No change to keyboard-source wrist controls, recording/replay data, lesson logic, audio or the ocarina model.
+- Replays do not record or change the camera view.
+- No camera views for other pages.
+
+## Acceptance criteria
+
+1. On first visit the stage opens on the `top` view.
+2. With the webcam or glove source, ← / → cycle front ↔ top ↔ side with a smooth ~0.6 s glide, wrapping at both ends.
+3. With the keyboard source, plain arrows still turn the wrist and do **not** move the camera; Shift + ← / → move the camera.
+4. Clicking Front / Top / Side glides to that view, and the active button is highlighted.
+5. Typing in the header search box with arrow keys does not change the view.
+6. After a reload, the last chosen view is restored.
+7. Both hands stay in frame in every view at 1280×800, 1440×900 and a narrow (≤ 768px) viewport.
+8. Unit tests cover view cycling (next/prev wrap), the key-handling rules (shift/keyboard-source/input-focus/repeat), and fallback for an invalid persisted value. `npm run typecheck -w web` and the web tests pass.
