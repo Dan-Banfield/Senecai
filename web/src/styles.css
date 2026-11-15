@@ -215,9 +215,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .gc-mosaic { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .globe-card .gc-mosaic img { height: 56px; border-radius: 8px; }
 .gc-playable { color: #9fd4a6; }
-.gc-skills { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 11.5px; }
-.gc-skills span { color: var(--muted); margin-right: 2px; }
-.gc-skills b { font-weight: 500; font-family: var(--mono); font-size: 10.5px; padding: 3px 7px; border-radius: 6px; background: var(--ink-3); color: var(--lake-hi); }
 .gc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
 .gc-soon { font-size: 12.5px; color: var(--birch-dim); border: 1px dashed var(--line); padding: 5px 10px; border-radius: 999px; }
 .gc-credit { font-size: 10.5px; color: var(--muted); text-decoration: none; margin-left: auto; }
@@ -255,6 +252,7 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .country-list.creations a { grid-template-columns: 1fr; padding: 9px 11px; }
 .country-list button:hover, .country-list a:hover { border-color: rgba(95, 163, 107, 0.5); background: rgba(95, 163, 107, 0.06); }
 .country-list img { width: 46px; height: 46px; border-radius: 9px; object-fit: cover; }
+.country-noimg { width: 46px; height: 46px; border-radius: 9px; background: var(--ink-3); }
 .country-list b { display: block; font-weight: 600; font-size: 14px; }
 .country-list small { display: block; color: var(--muted); font-size: 12px; }
 .country-list em { font-style: normal; font-family: var(--mono); font-size: 10.5px; padding: 3px 7px; border-radius: 6px; background: var(--ink-3); color: var(--birch-dim); }
@@ -370,7 +368,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .app.home .gc-thumb { background: var(--ink-3); }
 .app.home .gc-eyebrow, .app.home .gc-eyebrow.lake { color: #6b4f2f; font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: none; font-style: italic; }
 .app.home .gc-playable { color: var(--forest); }
-.app.home .gc-skills b { background: transparent; border: 1px solid rgba(78, 61, 43, 0.4); color: var(--birch-dim); font-family: var(--display); font-size: 13px; border-radius: 2px; }
 .app.home .globe-card h3, .app.home .country-panel h2 { font-variant: small-caps; letter-spacing: 0.03em; }
 .app.home .globe-leader { background: linear-gradient(90deg, rgba(78, 61, 43, 0.9), rgba(78, 61, 43, 0.3)); }
 .app.home .country-count { color: var(--forest); }
