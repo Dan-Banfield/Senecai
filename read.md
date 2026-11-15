@@ -96,7 +96,7 @@ Execute strictly in order for: $ARGUMENTS
 3.⁠ ⁠Delete low-priority items in ⁠ AUDIT.md ⁠, run ⁠ /clear ⁠, have parallel ⁠ implementer`s + `scrutinizer ⁠ fix the Critical/High blockers, delete ⁠ AUDIT.md ⁠, and ⁠ git commit ⁠.
 
 
-•⁠  ⁠*Building every feature:*
+•⁠  ⁠*Building every feature:
 1.⁠ ⁠Run ⁠ /clear ⁠ so previous debugging noise never carries over.
 2.⁠ ⁠Run ⁠ /spec-build <what you want to build> ⁠.
 3.⁠ ⁠Answer the interview prompts, approve the plan, verify the ⁠ PASS ⁠ result in your app, and ⁠ git commit ⁠.
