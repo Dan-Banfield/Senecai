@@ -33,6 +33,9 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 
 /* Header */
 .header { display: flex; align-items: center; gap: 28px; padding: 8px 28px 0; border-bottom: 1px solid var(--line); background: rgba(16, 21, 23, 0.92); backdrop-filter: blur(8px); position: relative; z-index: 20; }
+.brand { flex: none; text-decoration: none; color: var(--birch); line-height: 1; }
+.brand-name { font-family: var(--display); font-size: 26px; font-weight: 600; letter-spacing: 0.02em; }
+.brand:hover .brand-name { color: var(--forest-hi); }
 .spacer { flex: 1; }
 
 /* Header search */
@@ -53,6 +56,7 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .search-results li.search-empty { display: block; color: var(--muted); font-size: 13px; cursor: default; }
 @media (max-width: 640px) {
   .header { gap: 12px; padding: 8px 16px 0; }
+  .brand-name { font-size: 21px; }
 }
 
 /* Input control: a map-legend cartouche (thin double rule, like the plate frame), not a capsule. */
