@@ -135,14 +135,14 @@ describe('the hold', () => {
 
   it('lifts uncovered digits clear of their holes', () => {
     HOLES.forEach((h, i) => {
-      const hover = padWorld(i, reach(0.54, false)).distanceTo(PAD_TARGETS[i]);
+      const hover = padWorld(i, reach(h.coverOn - 0.01, false, h.coverOn)).distanceTo(PAD_TARGETS[i]);
       expect(hover, h.id).toBeGreaterThan(Math.max(0.04, HOLE_RADII[i]));
       expect(padWorld(i, 0).distanceTo(PAD_TARGETS[i]), h.id).toBeGreaterThan(0.12);
     });
   });
 
   it.each(['left', 'right'] as Side[])('never pushes the %s hand into the clay (open, hovering or covering)', (side) => {
-    for (const t of [() => 0, () => reach(0.5, false), () => 1]) {
+    for (const t of [() => 0, () => reach(0.5, false, 0.55), () => 1]) {
       const inside = handPoints(side, t).filter(insideScene);
       expect(inside.length).toBe(0);
     }

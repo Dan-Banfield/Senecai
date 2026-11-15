@@ -18,15 +18,34 @@ export interface HoleDef {
   dofIndex: number;
   /** Thumb holes are on the back (underside) of the ocarina. */
   back: boolean;
+  /** Flexion hysteresis: the hole becomes covered at >= coverOn, uncovered at < coverOff. */
+  coverOn: number;
+  coverOff: number;
 }
 
 const DOF_INDEX: Record<HoleFinger, number> = { thumb: 1, index: 2, middle: 3, ring: 4, little: 5 };
+
+/**
+ * Per-finger cover thresholds, as a fraction of the calibrated open..fist range.
+ * Covering a hole is a light bend, far from a fist, and real gloves show it: the
+ * thumb (pad pressed on the back) and the ring and little fingers barely move
+ * their joints, so they need lower thresholds than index and middle.
+ */
+const COVER: Record<HoleFinger, [on: number, off: number]> = {
+  thumb: [0.22, 0.15],
+  index: [0.35, 0.27],
+  middle: [0.35, 0.27],
+  ring: [0.3, 0.22],
+  little: [0.28, 0.2],
+};
 const hole = (side: Side, finger: HoleFinger): HoleDef => ({
   id: `${side === 'left' ? 'L' : 'R'}.${finger}`,
   side,
   finger,
   dofIndex: DOF_INDEX[finger],
   back: finger === 'thumb',
+  coverOn: COVER[finger][0],
+  coverOff: COVER[finger][1],
 });
 
 /**
@@ -49,10 +68,6 @@ export const HOLES: readonly HoleDef[] = [
 /** C5 D5 E5 F5 G5 A5 B5 C6 D6 E6 F6: index k = first k holes of HOLES open. k = 10 (all open) is silent in play. */
 export const SCALE_MIDI = [72, 74, 76, 77, 79, 81, 83, 84, 86, 88, 89] as const;
 
-/** Flexion hysteresis: a hole becomes covered at >= COVER_ON, uncovered at < COVER_OFF. */
-export const COVER_ON = 0.55;
-export const COVER_OFF = 0.45;
-
 /** true = covered, indexed like HOLES (length 10). */
 export type HoleStates = boolean[];
 
@@ -63,6 +78,8 @@ export interface OcarinaView {
   holes: HoleStates;
   /** Sounding note, or null when silent. */
   midi: number | null;
+  /** Per-hole cover threshold in use (calibrated or default), so the stage hovers digits against it. */
+  coverOn?: readonly number[];
 }
 
 /** `note` is scientific pitch ('C5', 'F#5', 'Bb5') or 'rest'. */

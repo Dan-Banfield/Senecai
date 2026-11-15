@@ -245,7 +245,7 @@ function Hands({ sample }: { sample: ViewSampler }) {
           () => {
             const view = sample();
             const dof = view.dof[side];
-            return dof ? holdPose(side, dof, view.holes, poses[side]) : undefined;
+            return dof ? holdPose(side, dof, view.holes, poses[side], view.coverOn) : undefined;
           },
         ]),
       ) as Record<Side, () => RobotPose | undefined>,

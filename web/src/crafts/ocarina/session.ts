@@ -17,6 +17,7 @@ import { toInspireAngles, type Dof6 } from '../../robot/retarget';
 import type { Side } from '../../rokoko/types';
 import { createSynth } from './audio';
 import { HoleTracker, midiToName, pitchOf } from './fingering';
+import { thresholdsFrom, useHoleCalibration } from './holeCalibration';
 import { Lesson, type NoteResult } from './lesson';
 import { TakePlayer, TakeRecorder } from './recording';
 import { SONGS } from './songs';
@@ -115,12 +116,24 @@ export class OcarinaSession {
   private lastUiAt = -Infinity;
   private raf = 0;
   private active = false;
+  private unsubs: (() => void)[] = [];
   private readonly view: OcarinaView = { dof: {}, holes: HOLES.map(() => false), midi: null };
 
   activate(): void {
     if (this.active) return;
     this.active = true;
     usePipeline.getState().setCalibrationContext('ocarina');
+    this.applyHoleCalibration();
+    this.unsubs = [
+      useHoleCalibration.subscribe(() => this.applyHoleCalibration()),
+      usePipeline.subscribe((s, prev) => {
+        if (s.kind !== prev.kind) this.applyHoleCalibration();
+        // The hole calibration is measured in the hand calibration's units: redoing that invalidates it.
+        if (s.calibratedAt !== prev.calibratedAt && s.calibratedAt?.context === 'ocarina' && s.kind) {
+          useHoleCalibration.getState().clear(s.kind);
+        }
+      }),
+    ];
     if (this.synthDisposed) {
       // StrictMode (and route re-entry) can dispose and re-activate the same session.
       this.synth = createSynth();
@@ -147,6 +160,8 @@ export class OcarinaSession {
     if (!this.active) return;
     this.active = false;
     cancelAnimationFrame(this.raf);
+    for (const u of this.unsubs) u();
+    this.unsubs = [];
     window.removeEventListener('pointerdown', this.unlock, true);
     window.removeEventListener('keydown', this.unlock, true);
     if (this.recorder.recording) this.stopRecording();
@@ -157,6 +172,14 @@ export class OcarinaSession {
   }
 
   private readonly unlock = (): void => this.synth.unlock();
+
+  /** Use the saved hole calibration for the current input source (defaults when there is none). */
+  private applyHoleCalibration(): void {
+    const kind = usePipeline.getState().kind;
+    const t = thresholdsFrom(kind ? useHoleCalibration.getState().bySource[kind] : undefined);
+    this.tracker.setThresholds(t);
+    this.view.coverOn = t.map((x) => x.on);
+  }
 
   /** Start audio from a user gesture (e.g. an "Enable sound" button). */
   enableAudio(): void {

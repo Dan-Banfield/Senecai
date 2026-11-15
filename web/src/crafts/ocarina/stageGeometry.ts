@@ -22,7 +22,7 @@ import { CURL_GAIN, FINGER_BASE, fingerLinks, THUMB_BASE, THUMB_LEN, THUMB_YAW, 
 import type { HandShape } from '../../robot/handShape';
 import type { Dof6 } from '../../robot/retarget';
 import type { Side } from '../../rokoko/types';
-import { COVER_ON, HOLES, type HoleStates } from './types';
+import { HOLES, type HoleStates } from './types';
 
 const X = new THREE.Vector3(1, 0, 0);
 const Y = new THREE.Vector3(0, 1, 0);
@@ -279,8 +279,8 @@ export const HOVER_MAX = 0.6;
  * its hole counts as covered, otherwise following the flexion but stopping
  * short, so a finger only touches a hole when it really covers it.
  */
-export function reach(flex: number, covered: boolean): number {
-  return covered ? 1 : HOVER_MAX * THREE.MathUtils.clamp(flex / COVER_ON, 0, 1);
+export function reach(flex: number, covered: boolean, coverOn: number): number {
+  return covered ? 1 : HOVER_MAX * THREE.MathUtils.clamp(flex / coverOn, 0, 1);
 }
 
 export function digitParams(holeIndex: number, t: number, out: DigitParams = []): DigitParams {
@@ -325,18 +325,24 @@ const tmp: DigitParams = [0, 0, 0, 0];
  * The pose the stage draws for one hand: the fixed hold, with every digit
  * placed by its hole state and flexion. Writes into `out` (allocation-free).
  */
-export function holdPose(side: Side, dof: Readonly<Dof6>, holes: Readonly<HoleStates>, out: RobotPose): RobotPose {
+export function holdPose(
+  side: Side,
+  dof: Readonly<Dof6>,
+  holes: Readonly<HoleStates>,
+  out: RobotPose,
+  coverOn?: readonly number[],
+): RobotPose {
   const h = HOLD_POSES[side];
   out.position = h.position;
   out.rotation = h.rotation;
   for (let k = 0; k < 6; k++) out.dof[k] = dof[k] || 0;
   const shape = out.shape ?? (out.shape = makeShape());
   const thumb = HOLE_OF[side][1]!;
-  const tp = digitParams(thumb, reach(dof[1] || 0, !!holes[thumb]), tmp);
+  const tp = digitParams(thumb, reach(dof[1] || 0, !!holes[thumb], coverOn?.[thumb] ?? HOLES[thumb].coverOn), tmp);
   thumbQuats(tp[0], tp[1], tp[2], tp[3], shape.thumb);
   for (let i = 0; i < 4; i++) {
     const hi = HOLE_OF[side][i + 2]!;
-    const fp = digitParams(hi, reach(dof[i + 2] || 0, !!holes[hi]), tmp);
+    const fp = digitParams(hi, reach(dof[i + 2] || 0, !!holes[hi], coverOn?.[hi] ?? HOLES[hi].coverOn), tmp);
     fingerQuats(fp[0], fp[1], fp[2], shape.fingers[i]);
   }
   return out;

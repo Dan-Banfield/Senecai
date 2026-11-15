@@ -2,18 +2,26 @@
 
 import type { Dof6 } from '../../robot/retarget';
 import type { Side } from '../../rokoko/types';
-import { COVER_OFF, COVER_ON, HOLES, SCALE_MIDI, type HoleStates } from './types';
+import { DEFAULT_THRESHOLDS, type HoleThreshold } from './holeCalibration';
+import { HOLES, SCALE_MIDI, type HoleStates } from './types';
 
 /** Tracks hole coverage per finger with hysteresis. */
 export class HoleTracker {
   private states: HoleStates = HOLES.map(() => false);
+  private thresholds: readonly HoleThreshold[] = DEFAULT_THRESHOLDS;
+
+  /** Per-hole thresholds from the hole calibration; undefined restores the defaults. */
+  setThresholds(t: readonly HoleThreshold[] | undefined): void {
+    this.thresholds = t ?? DEFAULT_THRESHOLDS;
+  }
 
   update(dof: Partial<Record<Side, Dof6>>): HoleStates {
     this.states = HOLES.map((h, i) => {
       const v = dof[h.side]?.[h.dofIndex];
       if (v === undefined) return false;
-      if (v >= COVER_ON) return true;
-      if (v < COVER_OFF) return false;
+      const { on, off } = this.thresholds[i];
+      if (v >= on) return true;
+      if (v < off) return false;
       return this.states[i];
     });
     return [...this.states];

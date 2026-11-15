@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Dof6, RobotHandCommand } from '../../robot/retarget';
 import { toInspireAngles } from '../../robot/retarget';
 import type { Side } from '../../rokoko/types';
+import { useHoleCalibration } from './holeCalibration';
 import { OcarinaSession, useOcarinaUi } from './session';
 import { HOLES, SCALE_MIDI, type Take, type TakeFrame } from './types';
 
@@ -24,7 +25,8 @@ vi.mock('../../input/pipeline', () => ({
     mocks.overrideCalls.push(fn ? 'fn' : null);
   },
   usePipeline: {
-    getState: () => ({ settings: { dominant: 'right' }, setCalibrationContext: (c: string) => mocks.contexts.push(c) }),
+    getState: () => ({ kind: 'gloves', settings: { dominant: 'right' }, setCalibrationContext: (c: string) => mocks.contexts.push(c) }),
+    subscribe: () => () => {},
   },
 }));
 
@@ -338,6 +340,31 @@ describe('OcarinaSession lifecycle', () => {
     s.activate();
     expect(mocks.contexts).toEqual(['ocarina', 'default', 'ocarina']);
     expect(useOcarinaUi.getState().takes).toHaveLength(1);
+    s.dispose();
+  });
+});
+
+describe('OcarinaSession hole calibration', () => {
+  it('applies the saved calibration for the current source, live', () => {
+    vi.stubGlobal('window', new EventTarget());
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    const light = (v: number): Dof6 => [0, v, v, v, v, v];
+    const s = new OcarinaSession();
+    s.activate();
+    setLive({ left: light(0.15), right: light(0.15) });
+    s.tick(16);
+    expect(s.getView().holes.some(Boolean)).toBe(false);
+
+    useHoleCalibration.getState().save('gloves', { open: HOLES.map(() => 0.02), covered: HOLES.map(() => 0.2) });
+    s.tick(16);
+    expect(s.getView().holes.every(Boolean)).toBe(true);
+    expect(s.getView().coverOn?.[0]).toBeCloseTo(0.11);
+
+    useHoleCalibration.getState().clear('gloves');
+    setLive({ left: light(0.05), right: light(0.05) });
+    s.tick(16);
+    expect(s.getView().holes.some(Boolean)).toBe(false);
     s.dispose();
   });
 });

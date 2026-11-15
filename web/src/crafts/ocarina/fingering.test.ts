@@ -8,6 +8,14 @@ const freq = (m: number) => 440 * 2 ** ((m - 69) / 12);
 /** First k holes of the lift order open, the rest covered. */
 const lifted = (k: number) => HOLES.map((_, i) => i >= k);
 const flat = (v: number): Dof6 => [v, v, v, v, v, v];
+/** Each hole's finger set to a per-hole value. */
+const perHole = (pick: (h: (typeof HOLES)[number]) => number) => {
+  const dof: Partial<Record<'left' | 'right', Dof6>> = { left: flat(0), right: flat(0) };
+  HOLES.forEach((h) => (dof[h.side]![h.dofIndex] = pick(h)));
+  return dof;
+};
+/** Inside every finger's hysteresis band: holds whatever state it had. */
+const inBand = perHole((h) => (h.coverOn + h.coverOff) / 2);
 
 describe('pitch model', () => {
   const table = ['C5', 'D5', 'E5', 'F5', 'G5', 'A5', 'B5', 'C6', 'D6', 'E6'];
@@ -90,13 +98,20 @@ describe('note names', () => {
 });
 
 describe('hole hysteresis', () => {
-  it('covers at 0.55 and uncovers below 0.45', () => {
+  it('covers at each finger\'s coverOn and uncovers below its coverOff', () => {
     const t = new HoleTracker();
-    expect(t.update({ left: flat(0.5), right: flat(0.5) }).every((c) => !c)).toBe(true);
-    expect(t.update({ left: flat(0.55), right: flat(0.55) }).every((c) => c)).toBe(true);
-    expect(t.update({ left: flat(0.45), right: flat(0.45) }).every((c) => c)).toBe(true);
-    expect(t.update({ left: flat(0.4499), right: flat(0.4499) }).every((c) => !c)).toBe(true);
-    expect(t.update({ left: flat(0.54), right: flat(0.54) }).every((c) => !c)).toBe(true);
+    expect(t.update(perHole((h) => h.coverOn - 1e-4)).every((c) => !c)).toBe(true);
+    expect(t.update(perHole((h) => h.coverOn)).every((c) => c)).toBe(true);
+    expect(t.update(perHole((h) => h.coverOff)).every((c) => c)).toBe(true);
+    expect(t.update(perHole((h) => h.coverOff - 1e-4)).every((c) => !c)).toBe(true);
+    expect(t.update(perHole((h) => h.coverOn - 1e-4)).every((c) => !c)).toBe(true);
+  });
+
+  it('has a hysteresis band on every finger, low enough for a light bend', () => {
+    for (const h of HOLES) {
+      expect(h.coverOff, h.id).toBeLessThan(h.coverOn);
+      expect(h.coverOn, h.id).toBeLessThanOrEqual(0.4);
+    }
   });
 
   it('reads each hole from its own side and DoF', () => {
@@ -110,23 +125,23 @@ describe('hole hysteresis', () => {
   it('a missing side uncovers its holes and forgets their state', () => {
     const t = new HoleTracker();
     t.update({ left: flat(1), right: flat(1) });
-    const holes = t.update({ right: flat(0.5) });
+    const holes = t.update({ right: inBand.right });
     HOLES.forEach((h, i) => expect(holes[i]).toBe(h.side === 'right'));
-    expect(t.update({ left: flat(0.5), right: flat(0.5) }).filter(Boolean)).toHaveLength(5);
+    expect(t.update(inBand).filter(Boolean)).toHaveLength(5);
   });
 
   it('reset uncovers everything', () => {
     const t = new HoleTracker();
     t.update({ left: flat(1), right: flat(1) });
     t.reset();
-    expect(t.update({ left: flat(0.5), right: flat(0.5) }).some(Boolean)).toBe(false);
+    expect(t.update(inBand).some(Boolean)).toBe(false);
   });
 
   it('returns a fresh array each call', () => {
     const t = new HoleTracker();
     const a = t.update({ left: flat(1) });
     a[9] = true;
-    expect(t.update({ left: flat(0.5) })[9]).toBe(false);
+    expect(t.update({ left: inBand.left })[9]).toBe(false);
   });
 });
 

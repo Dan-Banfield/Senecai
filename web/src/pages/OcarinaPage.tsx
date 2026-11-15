@@ -7,6 +7,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useOcarinaCamera } from '../crafts/ocarina/cameraStore';
 import { cameraKeyStep, VIEW_LABEL, VIEW_ORDER } from '../crafts/ocarina/cameraViews';
 import { fingeringFor, midiToName } from '../crafts/ocarina/fingering';
+import { useHoleCalibration } from '../crafts/ocarina/holeCalibration';
+import { HoleCalibrationWizard } from '../crafts/ocarina/HoleCalibrationWizard';
 import { market } from '../crafts/ocarina/market';
 import { library } from '../crafts/ocarina/market/library';
 import { noteIndexAt, takeNoteEvents } from '../crafts/ocarina/market/lessonSong';
@@ -19,53 +21,11 @@ import { LIB_PREFIX } from '../crafts/ocarina/lessonPrefs';
 import { PlaybackBar, WATCH_PREFIX } from '../crafts/ocarina/PlaybackBar';
 import { useSelectedSong } from '../crafts/ocarina/useSelectedSong';
 import { SONGS } from '../crafts/ocarina/songs';
-import { HOLES, type HoleStates } from '../crafts/ocarina/types';
+import { FingeringDiagram } from '../crafts/ocarina/FingeringDiagram';
+import { HOLES } from '../crafts/ocarina/types';
 import { useInputDemand, usePipeline } from '../input/pipeline';
 import { Icon } from '../ui/icons';
 import { WebcamPreview } from '../ui/WebcamPreview';
-
-/** Diagram order, as seen from the player: left hand on the left, index fingers in the middle. */
-const TOP_ROW = ['L.little', 'L.ring', 'L.middle', 'L.index', 'R.index', 'R.middle', 'R.ring', 'R.little'];
-const BACK_ROW = ['L.thumb', 'R.thumb'];
-const holeIndex = (id: string) => HOLES.findIndex((h) => h.id === id);
-
-/**
- * Ten-dot fingering chart: filled = covered. With `target`, holes to cover are outlined and wrong holes ringed.
- * `silent` marks a rest: holes fade and a "Wait" label sits in the middle.
- */
-export function FingeringDiagram({ holes, target, silent = false }: { holes: HoleStates; target?: HoleStates; silent?: boolean }) {
-  const dot = (id: string, x: number, y: number, r: number) => {
-    const i = holeIndex(id);
-    const covered = !!holes[i];
-    const want = target?.[i];
-    const wrong = target !== undefined && covered !== !!want;
-    return (
-      <g key={id}>
-        <title>{`${id}: ${covered ? 'covered' : 'open'}${target ? (want ? ' (cover)' : ' (lift)') : ''}`}</title>
-        {wrong && <circle className="oc-miss" cx={x} cy={y} r={r + 4.5} />}
-        <circle className={`oc-hole${covered ? ' covered' : ''}${want ? ' target' : ''}`} cx={x} cy={y} r={r} />
-      </g>
-    );
-  };
-  return (
-    <svg className={`oc-diagram${silent ? ' silent' : ''}`} viewBox="0 0 280 74" role="img" aria-label={silent ? 'Fingering chart: wait' : 'Fingering chart'}>
-      <line className="oc-split" x1={140} y1={8} x2={140} y2={66} />
-      {TOP_ROW.map((id, k) => dot(id, k < 4 ? 20 + k * 30 : 170 + (k - 4) * 30, 24, 10))}
-      {BACK_ROW.map((id, k) => dot(id, k === 0 ? 100 : 180, 58, 7))}
-      <text className="oc-label" x={6} y={70}>L</text>
-      <text className="oc-label" x={268} y={70}>R</text>
-      {silent && (
-        <g className="oc-silent" aria-hidden="true">
-          <rect x={96} y={30} width={88} height={24} rx={3} />
-          <text x={140} y={46} textAnchor="middle">
-            Wait
-          </text>
-        </g>
-      )}
-    </svg>
-  );
-}
-
 
 function FreePlay() {
   const noteName = useOcarinaUi((s) => s.noteName);
@@ -453,6 +413,9 @@ export default function OcarinaPage() {
   const status = usePipeline((s) => s.status);
   const [hudOpen, setHudOpen] = useState(true);
   const [marketOpen, setMarketOpen] = useState(false);
+  // Rendered at the page root (not inside the HUD) so the modal sits above everything with the page's palette.
+  const [calibrating, setCalibrating] = useState(false);
+  const holesCalibrated = useHoleCalibration((s) => (kind ? !!s.bySource[kind] : false));
   const view = useOcarinaCamera((s) => s.view);
   const setView = useOcarinaCamera((s) => s.setView);
 
@@ -480,16 +443,28 @@ export default function OcarinaPage() {
             <h1>Ocarina</h1>
             <div className="fi">ocarina · Budrio, Italy</div>
           </div>
-          <button
-            type="button"
-            className="oc-icon-btn oc-hud-toggle"
-            aria-expanded={hudOpen}
-            aria-label={hudOpen ? 'Hide controls' : 'Show controls'}
-            title={hudOpen ? 'Hide controls' : 'Show controls'}
-            onClick={() => setHudOpen((v) => !v)}
-          >
-            <Icon name={hudOpen ? 'collapse' : 'sliders'} />
-          </button>
+          <div className="oc-hud-tools">
+            {kind && (
+              <button
+                type="button"
+                className="btn small primary"
+                title="Fit each hole to how your fingers hover and press"
+                onClick={() => setCalibrating(true)}
+              >
+                {holesCalibrated ? 'Recalibrate' : 'Calibrate'}
+              </button>
+            )}
+            <button
+              type="button"
+              className="oc-icon-btn oc-hud-toggle"
+              aria-expanded={hudOpen}
+              aria-label={hudOpen ? 'Hide controls' : 'Show controls'}
+              title={hudOpen ? 'Hide controls' : 'Show controls'}
+              onClick={() => setHudOpen((v) => !v)}
+            >
+              <Icon name={hudOpen ? 'collapse' : 'sliders'} />
+            </button>
+          </div>
         </div>
 
         {hudOpen && (
@@ -552,6 +527,8 @@ export default function OcarinaPage() {
       <PlaybackBar session={session} />
 
       <MarketModal session={session} open={marketOpen} onClose={() => setMarketOpen(false)} />
+
+      {calibrating && <HoleCalibrationWizard onClose={() => setCalibrating(false)} />}
 
     </div>
   );
