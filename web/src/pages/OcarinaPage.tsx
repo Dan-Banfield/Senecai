@@ -405,7 +405,6 @@ export default function OcarinaPage() {
   }, [session]);
 
   const mode = useOcarinaUi((s) => s.mode);
-  const audioReady = useOcarinaUi((s) => s.audioReady);
   const tracked = useOcarinaUi((s) => s.tracked);
   const replaying = useOcarinaUi((s) => s.replaying);
   const lesson = useOcarinaUi((s) => s.lesson);
@@ -496,11 +495,6 @@ export default function OcarinaPage() {
           <Icon name="market" />
           Song market
         </button>
-        {!audioReady && (
-          <button className="btn primary oc-sound" onClick={() => session.enableAudio()}>
-            Enable sound
-          </button>
-        )}
         <WebcamPreview />
       </div>
 
