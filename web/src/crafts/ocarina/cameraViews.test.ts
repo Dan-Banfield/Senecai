@@ -101,7 +101,7 @@ describe('easeInOut', () => {
 
 describe('cameraKeyStep', () => {
   it('maps plain Left/Right for non-keyboard sources', () => {
-    for (const src of ['webcam', 'gloves', 'fused', null] as const) {
+    for (const src of ['webcam', 'gloves', null] as const) {
       expect(cameraKeyStep(key('ArrowRight'), src)).toBe(1);
       expect(cameraKeyStep(key('ArrowLeft'), src)).toBe(-1);
     }

@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
 import { calibrationKey, useInputDemand, usePipeline } from '../input/pipeline';
-import type { Rotation } from '../input/gloveTracker';
 import { SOURCE_LABELS } from '../input/types';
 import { Icon } from './icons';
 import { SOURCE_INFO, SOURCE_ORDER, sourceFields } from './inputFields';
@@ -206,7 +205,7 @@ export function InputPanel() {
           </div>
           {fields.includes('camera') && (
             <label className="inp-field">
-              <span>{kind === 'fused' ? 'Overhead camera' : 'Camera'}</span>
+              <span>Camera</span>
               <select value={cameras.some((c) => c.deviceId === settings.cameraId) ? settings.cameraId : ''} onChange={(e) => updateSettings({ cameraId: e.target.value })}>
                 <option value="">Default camera</option>
                 {cameras.map((c, i) => (
@@ -214,17 +213,6 @@ export function InputPanel() {
                     {c.label || `Camera ${i + 1}`}
                   </option>
                 ))}
-              </select>
-            </label>
-          )}
-          {fields.includes('rotation') && (
-            <label className="inp-field">
-              <span>Picture turned</span>
-              <select value={settings.cameraRotation ?? 0} onChange={(e) => updateSettings({ cameraRotation: Number(e.target.value) as Rotation })}>
-                <option value={0}>Not turned</option>
-                <option value={90}>90° clockwise</option>
-                <option value={180}>Upside down</option>
-                <option value={270}>90° anticlockwise</option>
               </select>
             </label>
           )}

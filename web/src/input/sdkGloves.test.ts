@@ -8,7 +8,6 @@ import { buildStudioFrame, synthOpenXrHand } from '../../../bridge/src/openxr-ha
 import { parseFrame } from '../rokoko/parse';
 import type { RokokoFrame } from '../rokoko/types';
 import { captureFist, captureOpen, defaultCalibration, Retargeter } from '../robot/retarget';
-import { placeHands } from './fusedSource';
 
 type Joint = { name: string; p: number[]; q: number[] };
 function sdkFrame(side: 'left' | 'right', curl: number, wristQ: number[] = [0, 0, 0, 1]): RokokoFrame {
@@ -102,36 +101,5 @@ describe('Rokoko Device SDK gloves', () => {
         expect(c.position.length()).toBeLessThan(0.02);
       });
     }
-  });
-
-  describe('with the webcam tracking where the hands are', () => {
-    const glove = (side: 'left' | 'right', local = new Quaternion()) => sdkFrame(side, 0.3, local.toArray());
-    it('moves each hand to where the camera sees it, leaving the glove data alone', () => {
-      const f = glove('right');
-      const placed = placeHands(f, { right: { p: { x: 0.12, y: 1.35, z: 0.42 } } })!;
-      const before = f.scene.actors[0].body!;
-      const after = placed.scene.actors[0].body!;
-      expect(after.rightHand!.position).toEqual({ x: 0.12, y: 1.35, z: 0.42 });
-      // Fingers keep their place relative to the wrist, and every rotation is the glove's.
-      const off = (b: typeof before, k: string) => b[k]!.position.x - b.rightHand!.position.x;
-      expect(off(after, 'rightIndexTip')).toBeCloseTo(off(before, 'rightIndexTip'), 9);
-      for (const k of Object.keys(before)) expect(after[k]!.rotation).toEqual(before[k]!.rotation);
-      const hands = parseFrame(placed);
-      expect(hands.positionsRelative).toBe(false);
-      expect(hands.framesOpenXR).toBe(true);
-    });
-
-    it('the robot hand moves with the camera position and turns with the glove', () => {
-      const cal = defaultCalibration();
-      cal.positionScale = 0.2;
-      const at = (x: number, turn: Quaternion) => parseFrame(placeHands(glove('right', turn), { right: { p: { x, y: 1.2, z: 0.3 } } })!);
-      captureOpen(cal, at(0, new Quaternion()).right!);
-      const turn = new Quaternion().setFromAxisAngle(new Vector3(0, 0, 1), 0.5);
-      const c = new Retargeter(cal).update(at(0.1, turn), 0).right!;
-      expect(c.position.x).toBeCloseTo(0.5, 5); // 10 cm to the right
-      expect(c.position.y).toBeCloseTo(0, 5);
-      expect(c.absolute).toBe(true);
-      expect(c.rotation.angleTo(turn)).toBeLessThan(1e-3);
-    });
   });
 });

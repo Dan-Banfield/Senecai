@@ -12,11 +12,9 @@ import { persist } from 'zustand/middleware';
 import { parseFrame, type HumanHands } from '../rokoko/parse';
 import type { RokokoFrame, Side } from '../rokoko/types';
 import { captureFist, captureOpen, defaultCalibration, Retargeter, toInspireAngles, type Calibration, type RobotHandCommand } from '../robot/retarget';
-import { FusedSource } from './fusedSource';
-import type { Rotation } from './gloveTracker';
 import { DEFAULT_BRIDGE_URL, GlovesSource } from './glovesSource';
 import { KeyboardSource } from './keyboardSource';
-import type { HandSource, SourceKind, SourceStatus } from './types';
+import { SOURCE_LABELS, type HandSource, type SourceKind, type SourceStatus } from './types';
 import { WebcamSource } from './webcamSource';
 
 const NO_HANDS = (): HumanHands => ({ actorName: '', timestamp: 0 });
@@ -49,8 +47,6 @@ export interface Settings {
   mirrorRobot: boolean;
   /** The camera hand tracking uses (a MediaDeviceInfo.deviceId); empty or missing means the browser's default. */
   cameraId?: string;
-  /** How far to turn the overhead camera's picture (clockwise) so you sit at its bottom edge. */
-  cameraRotation?: Rotation;
 }
 
 interface PipelineStore {
@@ -89,12 +85,12 @@ const retargeter = new Retargeter(defaultCalibration());
 
 function calibrationFor(kind: SourceKind, stored?: Calibration): Calibration {
   const cal = stored ? structuredClone(stored) : defaultCalibration();
-  // Hand positions come from the webcam for both of these.
-  if (!stored && (kind === 'webcam' || kind === 'fused')) {
+  // Hand positions come from the webcam.
+  if (!stored && kind === 'webcam') {
     cal.positionScale = 0.2;
   }
   // Glove yaw has an arbitrary zero (magnetic north), so start from wherever the hand is.
-  if (kind === 'gloves' || kind === 'fused') cal.autoNeutral = true;
+  if (kind === 'gloves') cal.autoNeutral = true;
   return cal;
 }
 
@@ -133,12 +129,10 @@ export const usePipeline = create<PipelineStore>()(
       updateSettings(s) {
         set({ settings: { ...get().settings, ...s } });
         if (live.source instanceof WebcamSource && s.swapHands !== undefined) live.source.swapHands = s.swapHands;
-        if (live.source instanceof FusedSource && s.swapHands !== undefined) live.source.camera.swapHands = s.swapHands;
         // Restart a running source whose connection settings changed (a stopped one picks them up when it starts).
         const kind = live.source ? get().kind : null;
-        if (s.bridgeUrl !== undefined && (kind === 'gloves' || kind === 'fused')) void runSource(kind);
-        else if (s.cameraId !== undefined && (kind === 'webcam' || kind === 'fused')) void runSource(kind);
-        else if (s.cameraRotation !== undefined && kind === 'fused') void runSource(kind);
+        if (s.bridgeUrl !== undefined && kind === 'gloves') void runSource(kind);
+        else if (s.cameraId !== undefined && kind === 'webcam') void runSource(kind);
       },
 
       calibrate(step) {
@@ -171,6 +165,12 @@ export const usePipeline = create<PipelineStore>()(
     {
       name: 'senecai.input.v1',
       partialize: (s) => ({ settings: s.settings, calibrations: s.calibrations, lastKind: s.lastKind }),
+      // A source that no longer exists (e.g. the removed gloves + webcam) is forgotten instead of restarted.
+      merge: (persisted, current) => {
+        const p = (persisted ?? {}) as Partial<PipelineStore>;
+        const lastKind = p.lastKind && p.lastKind in SOURCE_LABELS ? p.lastKind : null;
+        return { ...current, ...p, settings: { ...current.settings, ...p.settings }, lastKind };
+      },
     },
   ),
 );
@@ -180,19 +180,16 @@ async function runSource(kind: SourceKind) {
   haltSource();
   const { settings, calibrations, calibrationContext } = usePipeline.getState();
   retargeter.calibration = calibrationFor(kind, calibrations[calibrationKey(kind, calibrationContext)]);
-  // The webcam is noisier than the gloves, so smooth what it measures more:
-  // everything for the webcam alone, just positions with the gloves.
+  // The webcam is noisier than the gloves, so smooth what it measures more.
   retargeter.dofTau = kind === 'webcam' ? 0.07 : 0.03;
-  retargeter.posTau = kind === 'webcam' || kind === 'fused' ? 0.09 : 0.04;
+  retargeter.posTau = kind === 'webcam' ? 0.09 : 0.04;
 
   const source: HandSource =
     kind === 'webcam'
       ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands, cameraId: settings.cameraId ?? '' })
       : kind === 'gloves'
         ? new GlovesSource(settings.bridgeUrl)
-        : kind === 'fused'
-          ? new FusedSource(settings.bridgeUrl, settings.swapHands, settings.cameraId ?? '', settings.cameraRotation ?? 0)
-          : new KeyboardSource();
+        : new KeyboardSource();
   live.source = source;
   usePipeline.setState({ status: { state: 'starting', message: 'Starting…' } });
   try {

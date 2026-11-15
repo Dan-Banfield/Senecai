@@ -6,7 +6,6 @@ describe('sourceFields', () => {
   it('shows only the settings each source uses', () => {
     expect(sourceFields(null)).toEqual([]);
     expect(sourceFields('webcam')).toEqual(['camera', 'swapHands']);
-    expect(sourceFields('fused')).toEqual(['camera', 'rotation', 'swapHands', 'bridgeUrl']);
     expect(sourceFields('gloves')).toEqual(['bridgeUrl']);
     expect(sourceFields('keyboard')).toEqual([]);
   });

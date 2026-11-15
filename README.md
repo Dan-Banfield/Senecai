@@ -23,7 +23,6 @@ Open the app, click **Choose input** (top right), then pick one:
 |---|---|
 | 📷 Webcam (glove emulator) | MediaPipe hand tracking converted into **Rokoko JSON v3 frames**. Hold your hand up with the palm facing the camera. |
 | 🧤 Rokoko Smartgloves | Real gloves: Rokoko Studio → bridge → browser. |
-| 🙌 Gloves + webcam | The gloves drive fingers and wrist rotation; the webcam tracks where each hand is. Best with Smartgloves (no Coil Pro needed). |
 | ⌨️ Keyboard + mouse | Right hand: `A S D F G` curl thumb…little, `Space` = fist, `H` = thumb across palm, mouse moves the hand. Left hand: `Z` closes/opens its fist, arrow keys turn its wrist. |
 
 Calibrate (open hand, then fist; about 6 seconds) from the same panel. It makes a big difference.
