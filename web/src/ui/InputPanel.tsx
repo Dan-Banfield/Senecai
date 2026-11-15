@@ -8,12 +8,18 @@ import { WebcamPreview } from './WebcamPreview';
 
 export function SourcePill() {
   const { kind, status, present, setPanelOpen } = usePipeline();
-  const hands = [present.left && 'L', present.right && 'R'].filter(Boolean).join('+');
+  // A map-legend cartouche: status symbol, caption + source name, and both hands always shown.
   return (
     <button className="source-pill" onClick={() => setPanelOpen(true)} title={status.message}>
-      <span className={`dot ${status.state}`} />
-      {kind ? SOURCE_LABELS[kind] : 'Choose input'}
-      {hands && <span className="mono" style={{ color: 'var(--muted)' }}>{hands}</span>}
+      <span className={`cart-mark ${kind ? status.state : 'idle'}`} aria-hidden="true" />
+      <span className="cart-text">
+        <span className="cart-cap">Input</span>
+        <span className="cart-name">{kind ? SOURCE_LABELS[kind] : 'Choose input'}</span>
+      </span>
+      <span className="cart-hands" aria-label={`Left hand ${present.left ? 'tracked' : 'not tracked'}, right hand ${present.right ? 'tracked' : 'not tracked'}`}>
+        <span className={present.left ? 'on' : 'off'}>L</span>
+        <span className={present.right ? 'on' : 'off'}>R</span>
+      </span>
     </button>
   );
 }
