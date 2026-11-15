@@ -572,6 +572,14 @@ export default function OcarinaPage() {
         <div className="oc-hud-head">
           <div>
             <h1>Ocarina</h1>
+            <a
+              className="oc-model-link"
+              href="https://www.printables.com/model/65399-12-hole-playable-ocarina"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Playable ocarina model on Printables
+            </a>
           </div>
           <div className="oc-hud-tools">
             {kind && (
