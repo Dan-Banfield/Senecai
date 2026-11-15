@@ -3,6 +3,7 @@
 // either can be retimed for the playback speed.
 
 import { midiToName } from '../fingering';
+import type { NoteEvent } from '../lesson';
 import type { Song, SongNote, Take } from '../types';
 import { songToTake } from './generate';
 
@@ -25,8 +26,8 @@ interface Run {
   end: number;
 }
 
-/** The take's sounding notes as a lesson Song (silence trimmed at both ends). Empty notes when it never sounds. */
-export function takeToSong(take: Take, id: string, title: string): Song {
+/** The take's notes in take time (ms): runs of the sounding pitch, blips folded in, silence trimmed at both ends. */
+export function takeNoteEvents(take: Take): NoteEvent[] {
   const f = take.frames;
   const runs: Run[] = [];
   for (let i = 0; i < f.length; i++) {
@@ -51,9 +52,31 @@ export function takeToSong(take: Take, id: string, title: string): Song {
   while (clean.length && clean[0].midi === null) clean.shift();
   while (clean.length && clean[clean.length - 1].midi === null) clean.pop();
 
-  const notes: SongNote[] = clean.map((r) => ({
-    note: r.midi === null ? 'rest' : midiToName(r.midi),
-    beats: Math.max(0.05, Math.round(((r.end - r.start) / BEAT_MS) * 100) / 100),
+  return clean.map((r, index) => ({ index, midi: r.midi, startMs: r.start, durMs: r.end - r.start }));
+}
+
+/** Index of the note sounding (or last started) at take time `t`; 0 before the first note. */
+export function noteIndexAt(events: readonly NoteEvent[], t: number): number {
+  let lo = 0;
+  let hi = events.length - 1;
+  let found = 0;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (events[mid].startMs <= t) {
+      found = mid;
+      lo = mid + 1;
+    } else {
+      hi = mid - 1;
+    }
+  }
+  return found;
+}
+
+/** The take's sounding notes as a lesson Song (silence trimmed at both ends). Empty notes when it never sounds. */
+export function takeToSong(take: Take, id: string, title: string): Song {
+  const notes: SongNote[] = takeNoteEvents(take).map((e) => ({
+    note: e.midi === null ? 'rest' : midiToName(e.midi),
+    beats: Math.max(0.05, Math.round((e.durMs / BEAT_MS) * 100) / 100),
   }));
   return { id, title, bpm: DERIVED_BPM, beatsPerBar: 4, notes };
 }

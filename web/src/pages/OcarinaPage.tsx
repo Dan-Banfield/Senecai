@@ -9,14 +9,13 @@ import { cameraKeyStep, VIEW_LABEL, VIEW_ORDER } from '../crafts/ocarina/cameraV
 import { fingeringFor, midiToName } from '../crafts/ocarina/fingering';
 import { market } from '../crafts/ocarina/market';
 import { library } from '../crafts/ocarina/market/library';
-import { songAtSpeed } from '../crafts/ocarina/market/lessonSong';
+import { noteIndexAt, takeNoteEvents } from '../crafts/ocarina/market/lessonSong';
 import { MarketModal } from '../crafts/ocarina/market/MarketModal';
 import { previewPlayer } from '../crafts/ocarina/market/preview';
 import { ARTIST_MAX, TITLE_MAX } from '../crafts/ocarina/market/types';
-import { scheduleSong, type NoteResult } from '../crafts/ocarina/lesson';
 import { OcarinaStage } from '../crafts/ocarina/OcarinaStage';
 import { OcarinaSession, useOcarinaUi } from '../crafts/ocarina/session';
-import { LIB_PREFIX, useLessonPrefs } from '../crafts/ocarina/lessonPrefs';
+import { LIB_PREFIX } from '../crafts/ocarina/lessonPrefs';
 import { PlaybackBar, WATCH_PREFIX } from '../crafts/ocarina/PlaybackBar';
 import { useSelectedSong } from '../crafts/ocarina/useSelectedSong';
 import { SONGS } from '../crafts/ocarina/songs';
@@ -56,8 +55,6 @@ export function FingeringDiagram({ holes, target }: { holes: HoleStates; target?
   );
 }
 
-const RESULT_CLASS: Record<NoteResult, string> = { pending: '', hit: 'hit', miss: 'miss', rest: 'rest' };
-const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(3 - n);
 
 function FreePlay() {
   const noteName = useOcarinaUi((s) => s.noteName);
@@ -73,25 +70,41 @@ function FreePlay() {
 }
 
 function LessonPanel({ session }: { session: OcarinaSession }) {
-  const lesson = useOcarinaUi((s) => s.lesson);
   const holes = useOcarinaUi((s) => s.holes);
-  const noteName = useOcarinaUi((s) => s.noteName);
   const replaying = useOcarinaUi((s) => s.replaying);
-  const speed = useLessonPrefs((s) => s.speed);
   const sel = useSelectedSong();
   const [removeError, setRemoveError] = useState<string | null>(null);
+  const [time, setTime] = useState(0);
 
   const song = sel.song;
-  const events = useMemo(() => (song ? scheduleSong(songAtSpeed(song, speed)).events : []), [song, speed]);
-  const running = !!lesson && lesson.state !== 'done';
-  const target = lesson && lesson.state !== 'done' ? (events[lesson.current]?.midi ?? null) : null;
-  const targetHoles = target !== null ? fingeringFor(target) : undefined;
-  const from = lesson ? Math.max(0, Math.min(lesson.current - 1, events.length - 8)) : 0;
-  const lane = events.slice(from, from + 8);
+  const take = sel.take;
+  // Note timings straight from the take the playback bar replays, so the card follows it exactly.
+  const events = useMemo(() => (take ? takeNoteEvents(take) : []), [take]);
+  const following = replaying === WATCH_PREFIX + sel.pick;
   const playable = !!song && song.notes.length > 0;
 
+  // Follow the replay position (pause, seek and speed included) ~20x per second.
+  useEffect(() => {
+    if (!following) {
+      setTime(0);
+      return;
+    }
+    setTime(session.replayTime);
+    const id = window.setInterval(() => setTime(session.replayTime), 50);
+    return () => window.clearInterval(id);
+  }, [following, session]);
+
+  const current = following ? noteIndexAt(events, time) : 0;
+  const ev = events[current];
+  const next = events[current + 1];
+  const targetHoles = ev?.midi != null ? fingeringFor(ev.midi) : undefined;
+  const from = Math.max(0, Math.min(current - 1, events.length - 8));
+  const lane = events.slice(from, from + 8);
+  const progress = following && take ? Math.min(1, time / take.durationMs) : 0;
+  const noteLabel = (midi: number | null) => (midi === null ? 'rest' : midiToName(midi));
+
   const choose = (value: string) => {
-    if (lesson) session.stopLesson();
+    if (following) session.stopReplay();
     setRemoveError(null);
     sel.setPick(value);
   };
@@ -102,7 +115,7 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
         <h3>Lesson</h3>
         <div className="field" style={{ marginTop: 8 }}>
           Song
-          <select value={sel.pick} disabled={running} onChange={(e) => choose(e.target.value)}>
+          <select value={sel.pick} onChange={(e) => choose(e.target.value)}>
             <optgroup label="Built-in">
               {SONGS.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -130,7 +143,7 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
             <button
               type="button"
               className="oc-icon-btn ghost"
-              disabled={running}
+             
               aria-label="Remove from lesson library"
               title="Remove from lesson library"
               onClick={() => {
@@ -148,33 +161,32 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
         )}
       </div>
 
-      {lesson && (
+      {events.length > 0 && (
         <div className="card">
-          {lesson.state === 'countin' && <h3>Get ready… {lesson.countIn}</h3>}
-          {lesson.state === 'playing' && (
+          {following ? (
             <h3>
-              Play {target === null ? 'nothing (rest)' : midiToName(target)}
-              <span style={{ color: 'var(--muted)', fontSize: 14, marginLeft: 10 }}>you: {noteName ?? '—'}</span>
+              Now {ev ? noteLabel(ev.midi) : '—'}
+              {next && <span style={{ color: 'var(--muted)', fontSize: 14, marginLeft: 10 }}>next: {noteLabel(next.midi)}</span>}
+            </h3>
+          ) : (
+            <h3>
+              Starts on {ev ? noteLabel(ev.midi) : '—'}
+              <span style={{ color: 'var(--muted)', fontSize: 14, marginLeft: 10 }}>press play below to follow along</span>
             </h3>
           )}
-          {lesson.state === 'done' &&
-            (lesson.wait ? (
-              <h3>Practice complete</h3>
-            ) : (
-              <h3>
-                {Math.round(lesson.hitPercent)}% <span className="oc-stars">{stars(lesson.stars)}</span>
-              </h3>
-            ))}
           <div className="oc-lane">
-            {lane.map((ev) => (
-              <span key={ev.index} className={`oc-lane-note ${RESULT_CLASS[lesson.results[ev.index]]}${ev.index === lesson.current && lesson.state !== 'done' ? ' on' : ''}`}>
-                {ev.midi === null ? '·' : midiToName(ev.midi)}
+            {lane.map((e) => (
+              <span
+                key={e.index}
+                className={`oc-lane-note${e.midi === null ? ' rest' : ''}${e.index < current ? ' past' : ''}${e.index === current ? ' on' : ''}`}
+              >
+                {e.midi === null ? '·' : midiToName(e.midi)}
               </span>
             ))}
           </div>
-          {targetHoles && <FingeringDiagram holes={holes} target={targetHoles} />}
+          {targetHoles && <FingeringDiagram holes={following ? holes : targetHoles} target={targetHoles} />}
           <div className="meter" style={{ marginTop: 10 }}>
-            <div style={{ width: `${(Math.min(lesson.current, events.length) / events.length) * 100}%` }} />
+            <div style={{ width: `${progress * 100}%` }} />
           </div>
         </div>
       )}
