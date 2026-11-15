@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react';
-import { BrowserRouter, Link, Route, Routes, useLocation } from 'react-router-dom';
+import { BrowserRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { usePipeline } from './input/pipeline';
 import { InputPanel, SourcePill } from './ui/InputPanel';
 import { SearchBar } from './ui/SearchBar';
@@ -7,19 +7,6 @@ import { SearchBar } from './ui/SearchBar';
 // The globe pulls in globe.gl and country data; only load it on the home page.
 const GlobePage = lazy(() => import('./pages/GlobePage'));
 const OcarinaPage = lazy(() => import('./pages/OcarinaPage'));
-
-function Brand() {
-  return (
-    <Link to="/" className="brand">
-      <svg className="brand-mark" viewBox="0 0 32 32">
-        <circle cx="16" cy="16" r="14" fill="#2f6b3a" />
-        <path d="M9 20c3-8 11-8 14 0" stroke="#f2ede4" strokeWidth="2.5" fill="none" strokeLinecap="round" />
-        <circle cx="16" cy="11" r="2" fill="#f2ede4" />
-      </svg>
-      <span className="brand-name">Senecai</span>
-    </Link>
-  );
-}
 
 function useRestoreSource() {
   useEffect(() => {
@@ -33,7 +20,6 @@ function Shell() {
   return (
       <div className={`app ${home ? 'home' : 'craft'}`}>
         <header className="header">
-          {!home && <Brand />}
           <SearchBar />
           <div className="spacer" />
           <SourcePill />
