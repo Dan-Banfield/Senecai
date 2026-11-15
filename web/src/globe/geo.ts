@@ -94,16 +94,21 @@ export function inRing(ring: Position[], lng: number, lat: number) {
  */
 export function countryAt(features: CountryFeature[], lat: number, lng: number): string | undefined {
   let nearest: { name: string; d: number } | undefined;
+  let hit: string | undefined;
   for (const f of features) {
     const polys: Position[][][] = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
     for (const poly of polys) {
-      if (inRing(poly[0], lng, lat) && !poly.slice(1).some((hole) => inRing(hole, lng, lat))) return f.properties.name;
+      // Keep looking after a hit: small countries come last and can sit inside a coarse
+      // outline with no hole for them (the Vatican and San Marino inside Italy).
+      if (inRing(poly[0], lng, lat) && !poly.slice(1).some((hole) => inRing(hole, lng, lat))) hit = f.properties.name;
+      if (hit) continue;
       for (const [x, y] of poly[0]) {
         const d = distanceKm({ lat, lng }, { lat: y, lng: x });
         if (!nearest || d < nearest.d) nearest = { name: f.properties.name, d };
       }
     }
   }
+  if (hit) return hit;
   return nearest && nearest.d < 250 ? nearest.name : undefined;
 }
 

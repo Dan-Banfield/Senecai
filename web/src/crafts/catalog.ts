@@ -1,6 +1,10 @@
-// Every craft on the globe, pinned to the region it comes from, and what each
-// one teaches a robot hand. Add an entry (and its page and route) to put a
-// craft on the map. Photos go in web/public/crafts/ (640px).
+// Every craft on the globe, pinned to the region it comes from. Playable crafts (with a page and route) are listed
+// here; the "coming soon" crafts and instruments live in ./world/, one file
+// per region. Their photos are Wikimedia Commons links found by
+// web/scripts/craft-photo-links.mjs; playable crafts keep theirs in web/public/crafts/.
+
+import photos from './world/photos.json';
+import { WORLD_CRAFTS } from './world';
 
 export interface CraftImage {
   src: string;
@@ -21,16 +25,15 @@ export interface CraftInfo {
   lat: number;
   lng: number;
   blurb: string;
-  /** What practising this craft teaches a robot hand. */
-  robotSkills: string[];
   status: 'playable' | 'soon';
   route?: string;
-  image: CraftImage;
+  /** Missing when no freely licensed photo was found. */
+  image?: CraftImage;
 }
 
 const commons = (f: string) => `https://commons.wikimedia.org/wiki/File:${f}`;
 
-export const CRAFTS: CraftInfo[] = [
+const PLAYABLE: CraftInfo[] = [
   {
     id: 'ocarina',
     name: 'Ocarina',
@@ -41,12 +44,6 @@ export const CRAFTS: CraftInfo[] = [
     lng: 11.535,
     blurb:
       'A clay vessel flute that Giuseppe Donati turned into a 12-hole concert instrument in Budrio in 1853. Its pitch follows how much hole area is open, so every fingertip has to seal cleanly.',
-    robotSkills: [
-      'independent finger isolation',
-      'sealing holes with fingertip pads',
-      'timed finger-lift sequences',
-      'two-hand coordination',
-    ],
     status: 'playable',
     route: '/craft/ocarina',
     image: {
@@ -57,6 +54,13 @@ export const CRAFTS: CraftInfo[] = [
       source: commons('2016-01_Ocarina_front.jpg'),
     },
   },
+];
+
+const PHOTOS = photos as Record<string, CraftImage>;
+
+export const CRAFTS: CraftInfo[] = [
+  ...PLAYABLE,
+  ...WORLD_CRAFTS.map(({ wiki: _wiki, ...c }): CraftInfo => ({ ...c, status: 'soon', image: PHOTOS[c.id] })),
 ];
 
 export const craftById = (id: string) => CRAFTS.find((c) => c.id === id);

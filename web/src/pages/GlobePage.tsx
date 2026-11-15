@@ -116,19 +116,13 @@ interface PinHandlers {
 function CraftCard({ craft }: { craft: CraftInfo }) {
   return (
     <>
-      <img src={craft.image.src} alt={craft.image.alt} />
+      {craft.image && <img src={craft.image.src} alt={craft.image.alt} />}
       <div className="gc-body">
         <div className="gc-eyebrow">{craft.region}</div>
         <h3>
           {craft.name} <i>{craft.localName}</i>
         </h3>
         <p>{craft.blurb}</p>
-        <div className="gc-skills">
-          <span>Teaches a robot</span>
-          {craft.robotSkills.map((s) => (
-            <b key={s}>{s}</b>
-          ))}
-        </div>
         <div className="gc-foot">
           {craft.status === 'playable' ? (
             <Link className="btn small primary" to={craft.route!}>
@@ -137,9 +131,11 @@ function CraftCard({ craft }: { craft: CraftInfo }) {
           ) : (
             <span className="gc-soon">Coming to Senecai</span>
           )}
-          <a className="gc-credit" href={craft.image.source} target="_blank" rel="noreferrer">
-            Photo: {craft.image.author} · {craft.image.license}
-          </a>
+          {craft.image && (
+            <a className="gc-credit" href={craft.image.source} target="_blank" rel="noreferrer">
+              Photo: {craft.image.author} · {craft.image.license}
+            </a>
+          )}
         </div>
       </div>
     </>
@@ -154,11 +150,14 @@ function ClusterCard({ pin, onLand }: { pin: Extract<Pin, { kind: 'cluster' }>; 
       <h3>
         {pin.crafts.length} craft{pin.crafts.length === 1 ? '' : 's'}
       </h3>
-      {pin.crafts.length > 0 && (
+      {pin.crafts.some((c) => c.image) && (
         <div className="gc-mosaic">
-          {pin.crafts.slice(0, 4).map((c) => (
-            <img key={c.id} src={c.image.src} alt={c.name} title={c.name} />
-          ))}
+          {pin.crafts
+            .filter((c) => c.image)
+            .slice(0, 4)
+            .map((c) => (
+              <img key={c.id} src={c.image!.src} alt={c.name} title={c.name} />
+            ))}
         </div>
       )}
       <p>
@@ -587,7 +586,7 @@ export default function GlobePage() {
               {here.crafts.map((c) => (
                 <li key={c.id}>
                   <button onMouseEnter={() => focusCraft(c)} onMouseLeave={scheduleHide} onClick={() => (c.route ? navigate(c.route) : focusCraft(c))}>
-                    <img src={c.image.src} alt="" />
+                    {c.image ? <img src={c.image.src} alt="" /> : <span className="country-noimg" aria-hidden="true" />}
                     <span>
                       <b>{c.name}</b>
                       <small>{c.region}</small>

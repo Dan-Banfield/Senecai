@@ -3,6 +3,8 @@
 // the holes. Free play, lessons, and session-only takes with replay.
 
 import { useEffect, useMemo, useState } from 'react';
+import { useOcarinaCamera } from '../crafts/ocarina/cameraStore';
+import { cameraKeyStep, VIEW_LABEL, VIEW_ORDER } from '../crafts/ocarina/cameraViews';
 import { fingeringFor, midiToName } from '../crafts/ocarina/fingering';
 import { scheduleSong, type NoteResult } from '../crafts/ocarina/lesson';
 import { OcarinaStage } from '../crafts/ocarina/OcarinaStage';
@@ -11,8 +13,8 @@ import { useInputDemand } from '../input/pipeline';
 import { SONGS } from '../crafts/ocarina/songs';
 import { HOLES, type HoleStates } from '../crafts/ocarina/types';
 import { calibrationKey, usePipeline } from '../input/pipeline';
+import { Icon } from '../ui/icons';
 import { CalibrationWizard } from '../ui/InputPanel';
-import { PipelineStrip } from '../ui/PipelineStrip';
 import { WebcamPreview } from '../ui/WebcamPreview';
 
 /** Diagram order, as seen from the player: left hand on the left, index fingers in the middle. */
@@ -186,43 +188,103 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
   );
 }
 
-function RecordingCard({ session }: { session: OcarinaSession }) {
+const fmtTime = (ms: number) => {
+  const total = Math.max(0, ms) / 1000;
+  const m = Math.floor(total / 60);
+  const sec = (total % 60).toFixed(1).padStart(4, '0');
+  return `${m}:${sec}`;
+};
+
+/** Voice-recorder style strip: record button + timer, sound and robot toggles, then the take list. */
+function Recorder({ session }: { session: OcarinaSession }) {
   const recording = useOcarinaUi((s) => s.recording);
   const takes = useOcarinaUi((s) => s.takes);
   const replaying = useOcarinaUi((s) => s.replaying);
-  const replayingName = takes.find((t) => t.id === replaying)?.name;
+  const muted = useOcarinaUi((s) => s.muted);
+  const mirror = usePipeline((s) => s.settings.mirrorRobot);
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  const [now, setNow] = useState(() => performance.now());
+
+  useEffect(() => {
+    if (!recording) {
+      setStartedAt(null);
+      return;
+    }
+    const t0 = performance.now();
+    setStartedAt(t0);
+    setNow(t0);
+    const id = window.setInterval(() => setNow(performance.now()), 100);
+    return () => window.clearInterval(id);
+  }, [recording]);
+
+  const elapsed = startedAt === null ? 0 : now - startedAt;
+
   return (
-    <div className="card">
-      <h3>Takes</h3>
-      <p>Takes record your fingers, holes, notes and robot commands. They last until you leave the page.</p>
-      <div className="row" style={{ marginTop: 12 }}>
-        <button className="btn small rec" disabled={!!replaying} onClick={() => (recording ? session.stopRecording() : session.startRecording())}>
-          {recording ? '■ Stop' : '● Record'}
+    <div className="card oc-recorder">
+      <div className="oc-rec-bar">
+        <button
+          type="button"
+          className={`oc-rec-btn${recording ? ' on' : ''}`}
+          disabled={!!replaying}
+          aria-label={recording ? 'Stop recording' : 'Record a take'}
+          title={recording ? 'Stop recording' : 'Record a take (fingers, notes and robot commands; kept until you leave)'}
+          onClick={() => (recording ? session.stopRecording() : session.startRecording())}
+        >
+          <span />
         </button>
-        {replayingName && <span style={{ color: 'var(--lake-hi)', fontSize: 14 }}>Replaying {replayingName}</span>}
+        <span className={`oc-rec-time mono${recording ? ' live' : ''}`}>{fmtTime(elapsed)}</span>
+        <div className="spacer" />
+        <button
+          type="button"
+          className={`oc-icon-btn${muted ? ' off' : ''}`}
+          aria-label={muted ? 'Unmute' : 'Mute'}
+          aria-pressed={muted}
+          title={muted ? 'Unmute' : 'Mute'}
+          onClick={() => session.setMuted(!muted)}
+        >
+          <Icon name={muted ? 'mute' : 'volume'} />
+        </button>
+        <button
+          type="button"
+          className={`oc-icon-btn${mirror ? ' active' : ' off'}`}
+          aria-label={`Robot mirror ${mirror ? 'on' : 'off'}, open input panel`}
+          title={`Robot mirror ${mirror ? 'on' : 'off'} (change in the input panel). Replays stream to the robot.`}
+          onClick={() => usePipeline.getState().setPanelOpen(true)}
+        >
+          <Icon name="robot" />
+        </button>
       </div>
       {takes.length > 0 && (
-        <div className="oc-takes">
-          {takes.map((t) => (
-            <div key={t.id} className="oc-take">
-              <b>{t.name}</b>
-              <span className="mono">{(t.durationMs / 1000).toFixed(1)} s</span>
-              <div className="spacer" />
-              {replaying === t.id ? (
-                <button className="btn small" onClick={() => session.stopReplay()}>
-                  Stop
+        <ul className="oc-takes">
+          {takes.map((t) => {
+            const playing = replaying === t.id;
+            return (
+              <li key={t.id} className={`oc-take${playing ? ' playing' : ''}`}>
+                <button
+                  type="button"
+                  className="oc-icon-btn"
+                  disabled={!playing && recording}
+                  aria-label={playing ? `Stop ${t.name}` : `Replay ${t.name}`}
+                  title={playing ? 'Stop' : 'Replay'}
+                  onClick={() => (playing ? session.stopReplay() : session.replay(t.id))}
+                >
+                  <Icon name={playing ? 'stop' : 'play'} size={16} />
                 </button>
-              ) : (
-                <button className="btn small" disabled={recording} onClick={() => session.replay(t.id)}>
-                  Replay
+                <span className="oc-take-name">{t.name}</span>
+                <span className="mono">{fmtTime(t.durationMs)}</span>
+                <button
+                  type="button"
+                  className="oc-icon-btn ghost"
+                  aria-label={`Delete ${t.name}`}
+                  title="Delete"
+                  onClick={() => session.deleteTake(t.id)}
+                >
+                  <Icon name="trash" size={16} />
                 </button>
-              )}
-              <button className="btn small ghost" onClick={() => session.deleteTake(t.id)}>
-                Delete
-              </button>
-            </div>
-          ))}
-        </div>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
@@ -238,16 +300,28 @@ export default function OcarinaPage() {
   }, [session]);
 
   const mode = useOcarinaUi((s) => s.mode);
-  const muted = useOcarinaUi((s) => s.muted);
   const audioReady = useOcarinaUi((s) => s.audioReady);
   const tracked = useOcarinaUi((s) => s.tracked);
   const replaying = useOcarinaUi((s) => s.replaying);
   const lesson = useOcarinaUi((s) => s.lesson);
   const kind = usePipeline((s) => s.kind);
   const status = usePipeline((s) => s.status);
-  const mirror = usePipeline((s) => s.settings.mirrorRobot);
   const [calibrating, setCalibrating] = useState(false);
   const [hudOpen, setHudOpen] = useState(true);
+  const view = useOcarinaCamera((s) => s.view);
+  const setView = useOcarinaCamera((s) => s.setView);
+
+  // Arrow keys switch the camera view (Shift + arrows with the keyboard source, whose plain arrows turn the wrist).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const dir = cameraKeyStep(e, usePipeline.getState().kind);
+      if (!dir) return;
+      e.preventDefault();
+      useOcarinaCamera.getState().step(dir);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   return (
     <div className="oc-page">
@@ -263,20 +337,18 @@ export default function OcarinaPage() {
           </div>
           <button
             type="button"
-            className="btn ghost small oc-hud-toggle"
+            className="oc-icon-btn oc-hud-toggle"
             aria-expanded={hudOpen}
+            aria-label={hudOpen ? 'Hide controls' : 'Show controls'}
+            title={hudOpen ? 'Hide controls' : 'Show controls'}
             onClick={() => setHudOpen((v) => !v)}
           >
-            {hudOpen ? 'Hide' : 'Controls'}
+            <Icon name={hudOpen ? 'collapse' : 'sliders'} />
           </button>
         </div>
 
         {hudOpen && (
           <div className="oc-hud-body">
-            <p style={{ margin: 0, color: 'var(--birch-dim)', fontSize: 14 }}>
-              Giuseppe Donati's clay vessel flute: each finger seals one hole, and the open area sets the pitch.
-            </p>
-
             <InputCard onCalibrate={() => setCalibrating(true)} />
 
             <div className="tabs">
@@ -290,23 +362,7 @@ export default function OcarinaPage() {
 
             {mode === 'free' ? <FreePlay /> : <LessonPanel session={session} />}
 
-            <RecordingCard session={session} />
-
-            <div className="card">
-              <div className="row">
-                <button className="btn small" onClick={() => session.setMuted(!muted)}>
-                  {muted ? 'Unmute' : 'Mute'}
-                </button>
-                <span style={{ fontSize: 13, color: 'var(--birch-dim)' }}>Sound plays whenever a hole is covered.</span>
-              </div>
-              <p style={{ marginTop: 10, fontSize: 13 }}>
-                Robot mirror is {mirror ? 'on' : 'off'} (set it in the{' '}
-                <button className="oc-link" onClick={() => usePipeline.getState().setPanelOpen(true)}>
-                  input panel
-                </button>
-                ). Replaying a take streams the recorded commands to the robot.
-              </p>
-            </div>
+            <Recorder session={session} />
           </div>
         )}
       </aside>
@@ -321,12 +377,24 @@ export default function OcarinaPage() {
         <WebcamPreview />
       </div>
 
+      <div
+        className="oc-views"
+        role="group"
+        aria-label="Camera view"
+        title={kind === 'keyboard' ? 'Shift + ← / → to switch view' : '← / → to switch view'}
+      >
+        {VIEW_ORDER.map((id) => (
+          <button key={id} type="button" className={view === id ? 'on' : ''} aria-pressed={view === id} onClick={() => setView(id)}>
+            {VIEW_LABEL[id]}
+          </button>
+        ))}
+      </div>
+
       <div className="stage-overlay">
         {lesson?.state === 'countin' && <div className="feedback">{lesson.countIn}</div>}
         {!replaying && !tracked.left && !tracked.right && (
           <div className="hint">{kind ? `Show your hands to play. (${status.message})` : 'Choose a hand input (Rokoko Smartgloves recommended) to play.'}</div>
         )}
-        <PipelineStrip dofOverride={replaying ? session.replayDof : undefined} />
       </div>
 
       {calibrating && <CalibrationWizard onClose={() => setCalibrating(false)} />}

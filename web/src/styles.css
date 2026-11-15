@@ -215,9 +215,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .gc-mosaic { display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; }
 .globe-card .gc-mosaic img { height: 56px; border-radius: 8px; }
 .gc-playable { color: #9fd4a6; }
-.gc-skills { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 11.5px; }
-.gc-skills span { color: var(--muted); margin-right: 2px; }
-.gc-skills b { font-weight: 500; font-family: var(--mono); font-size: 10.5px; padding: 3px 7px; border-radius: 6px; background: var(--ink-3); color: var(--lake-hi); }
 .gc-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 4px; flex-wrap: wrap; }
 .gc-soon { font-size: 12.5px; color: var(--birch-dim); border: 1px dashed var(--line); padding: 5px 10px; border-radius: 999px; }
 .gc-credit { font-size: 10.5px; color: var(--muted); text-decoration: none; margin-left: auto; }
@@ -255,6 +252,7 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .country-list.creations a { grid-template-columns: 1fr; padding: 9px 11px; }
 .country-list button:hover, .country-list a:hover { border-color: rgba(95, 163, 107, 0.5); background: rgba(95, 163, 107, 0.06); }
 .country-list img { width: 46px; height: 46px; border-radius: 9px; object-fit: cover; }
+.country-noimg { width: 46px; height: 46px; border-radius: 9px; background: var(--ink-3); }
 .country-list b { display: block; font-weight: 600; font-size: 14px; }
 .country-list small { display: block; color: var(--muted); font-size: 12px; }
 .country-list em { font-style: normal; font-family: var(--mono); font-size: 10.5px; padding: 3px 7px; border-radius: 6px; background: var(--ink-3); color: var(--birch-dim); }
@@ -373,7 +371,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .app.home .gc-thumb { background: var(--ink-3); }
 .app.home .gc-eyebrow, .app.home .gc-eyebrow.lake { color: #6b4f2f; font-family: var(--display); font-size: 13px; letter-spacing: 0.08em; text-transform: none; font-style: italic; }
 .app.home .gc-playable { color: var(--forest); }
-.app.home .gc-skills b { background: transparent; border: 1px solid rgba(78, 61, 43, 0.4); color: var(--birch-dim); font-family: var(--display); font-size: 13px; border-radius: 2px; }
 .app.home .globe-card h3, .app.home .country-panel h2 { font-variant: small-caps; letter-spacing: 0.03em; }
 .app.home .globe-leader { background: linear-gradient(90deg, rgba(78, 61, 43, 0.9), rgba(78, 61, 43, 0.3)); }
 .app.home .country-count { color: var(--forest); }
@@ -414,10 +411,41 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .oc-lane-note.hit { color: var(--good); border-color: var(--good); }
 .oc-lane-note.miss { color: var(--bad); border-color: var(--bad); }
 .oc-lane-note.rest { color: var(--muted); }
-.oc-takes { display: grid; gap: 6px; margin-top: 12px; }
+.oc-recorder { padding: 10px 12px; }
+.oc-rec-bar { display: flex; align-items: center; gap: 10px; }
+.oc-rec-btn {
+  width: 40px; height: 40px; flex: none; border-radius: 50%;
+  display: grid; place-items: center; padding: 0;
+  background: rgba(239, 227, 198, 0.9); border: 2px solid rgba(78, 61, 43, 0.45);
+  transition: border-color 0.15s, transform 0.1s;
+}
+.oc-rec-btn span { width: 18px; height: 18px; border-radius: 50%; background: #b8432f; transition: border-radius 0.15s, width 0.15s, height 0.15s; }
+.oc-rec-btn:hover:not(:disabled) { border-color: #b8432f; }
+.oc-rec-btn:active:not(:disabled) { transform: scale(0.94); }
+.oc-rec-btn.on { border-color: #b8432f; animation: oc-rec-pulse 1.4s ease-in-out infinite; }
+.oc-rec-btn.on span { width: 14px; height: 14px; border-radius: 3px; }
+.oc-rec-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+@keyframes oc-rec-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(184, 67, 47, 0.35); } 50% { box-shadow: 0 0 0 6px rgba(184, 67, 47, 0); } }
+.oc-rec-time { font-size: 16px; color: var(--birch-dim); font-variant-numeric: tabular-nums; }
+.oc-rec-time.live { color: #b8432f; }
+.oc-icon-btn {
+  width: 32px; height: 32px; flex: none; padding: 0;
+  display: inline-grid; place-items: center;
+  background: rgba(239, 227, 198, 0.75); border: 1px solid rgba(78, 61, 43, 0.4); border-radius: 3px;
+  color: var(--birch); transition: border-color 0.15s, color 0.15s, background 0.15s;
+}
+.oc-icon-btn:hover:not(:disabled) { border-color: var(--sepia); }
+.oc-icon-btn.off { color: var(--birch-dim); }
+.oc-icon-btn.active { color: var(--forest); border-color: var(--forest); }
+.oc-icon-btn.ghost { background: transparent; border-color: transparent; color: var(--birch-dim); }
+.oc-icon-btn.ghost:hover:not(:disabled) { color: #b8432f; border-color: transparent; }
+.oc-icon-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.oc-takes { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid rgba(78, 61, 43, 0.2); display: grid; gap: 4px; }
 .oc-take { display: flex; gap: 8px; align-items: center; font-size: 14px; }
-.oc-take .mono { color: var(--muted); }
-.oc-link { background: none; border: 0; padding: 0; color: var(--lake-hi); text-decoration: underline; font-size: inherit; }
+.oc-take .oc-icon-btn:first-child { width: 28px; height: 28px; border-radius: 50%; }
+.oc-take.playing .oc-icon-btn:first-child { color: var(--forest); border-color: var(--forest); }
+.oc-take-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--birch); }
+.oc-take .mono { color: var(--muted); font-size: 12px; }
 .oc-stage-tag { position: absolute; left: 18px; top: 18px; padding: 5px 12px; border-radius: 999px; background: rgba(16, 21, 23, 0.8); border: 1px solid var(--lake-hi); font-family: var(--display); font-size: 17px; color: var(--lake-hi); pointer-events: none; }
 .oc-sound { position: absolute; right: 18px; top: 18px; pointer-events: auto; }
 
@@ -474,16 +502,8 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .oc-hud.collapsed .oc-hud-head { border-bottom: 0; padding: 10px 14px; }
 .oc-hud-head h1 { font-family: var(--display); font-size: 26px; line-height: 1.05; color: var(--birch); }
 .oc-hud-head .fi { font-family: var(--display); font-style: italic; font-size: 14px; color: var(--forest); }
-.oc-hud-toggle {
-  background: rgba(239, 227, 198, 0.75);
-  border: 1px solid rgba(78, 61, 43, 0.45);
-  border-radius: 3px;
-  padding: 5px 11px;
-  font-size: 12px;
-  color: var(--birch-dim);
-  flex: none;
-}
-.oc-hud-toggle:hover { color: var(--birch); border-color: var(--sepia); }
+.oc-hud-toggle { color: var(--birch-dim); }
+.oc-hud-toggle:hover { color: var(--birch); }
 
 .oc-hud-body {
   padding: 12px 16px 16px;
@@ -541,7 +561,7 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
   box-shadow: 0 10px 28px rgba(78, 61, 43, 0.22);
 }
 .app.craft .hint {
-  bottom: 118px;
+  bottom: 24px;
   background: rgba(246, 238, 219, 0.95);
   border: 1px solid rgba(78, 61, 43, 0.45);
   border-radius: 3px;
@@ -558,13 +578,43 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
   backdrop-filter: none;
 }
 
+/* Camera view pill: bottom-right of the stage, above the pipeline strip. */
+.oc-views {
+  position: absolute;
+  right: 24px;
+  bottom: 24px;
+  z-index: 12;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(239, 227, 198, 0.75);
+  border: 1px solid rgba(78, 61, 43, 0.45);
+  border-radius: 3px;
+  box-shadow: 0 8px 24px rgba(78, 61, 43, 0.18);
+}
+.oc-views button {
+  background: none;
+  border: 0;
+  border-radius: 2px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--birch-dim);
+}
+.oc-views button:hover { color: var(--birch); }
+.oc-views button.on { background: var(--forest); color: #f6eedb; }
+/* Keep the centred hint clear of the pill on mid-width screens. */
+.oc-page .hint { max-width: min(520px, calc(100% - 400px)); }
+
 @media (max-width: 768px) {
   .oc-hud { left: 12px; right: 12px; top: 84px; width: auto; max-height: 42vh; }
   .oc-hud.collapsed { right: auto; min-width: 0; }
   .oc-top-actions { top: 84px; right: 12px; }
-  .oc-hud:not(.collapsed) ~ .oc-top-actions { top: auto; bottom: 118px; right: 12px; }
+  .oc-hud:not(.collapsed) ~ .oc-top-actions { top: auto; bottom: 12px; right: 12px; }
   .app.craft .oc-top-actions .webcam { width: 160px; }
   .app.craft .strip { left: 12px; right: 12px; bottom: 12px; gap: 8px; overflow-x: auto; }
-  .app.craft .hint { bottom: 112px; max-width: calc(100% - 24px); }
+  .app.craft .hint { bottom: 12px; max-width: calc(100% - 24px); }
   .oc-hud:not(.collapsed) ~ .stage-overlay .hint { left: 12px; transform: none; max-width: calc(100% - 190px); text-align: left; }
+  /* Pill bottom-left (bottom-right is taken by the webcam when the HUD is open); the hint moves above it. */
+  .oc-views { left: 12px; right: auto; bottom: 12px; }
+  .app.craft .oc-page .hint { bottom: 52px; }
 }

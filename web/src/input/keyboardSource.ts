@@ -7,6 +7,7 @@
 // Left (other) hand, resting in front of you:
 //   Z          = close / open its fist (toggle)
 //   Arrow keys = turn its wrist (left/right, tip up/down)
+// Shift + Left/Right is left alone: on the ocarina page it switches the camera view.
 // It still emits Rokoko JSON v3 frames, built with forward kinematics.
 
 import { Euler, Quaternion, Vector3 } from 'three';
@@ -16,7 +17,7 @@ import type { HandSource, SourceStatus } from './types';
 
 const FINGER_KEYS = ['a', 's', 'd', 'f', 'g'];
 
-export const KEYBOARD_HELP = 'A S D F G = thumb…little · Space = fist · H = thumb across palm · mouse = move hand · Z = left fist · arrows = turn left wrist';
+export const KEYBOARD_HELP = 'A S D F G = thumb…little · Space = fist · H = thumb across palm · mouse = move hand · Z = left fist · arrows = turn left wrist · shift+←/→ = camera view';
 
 export class KeyboardSource implements HandSource {
   readonly kind = 'keyboard' as const;
@@ -39,6 +40,8 @@ export class KeyboardSource implements HandSource {
     };
     const kd = (e: KeyboardEvent) => {
       if (typing(e)) return;
+      // Shift + Left/Right belongs to the ocarina camera; its handler calls preventDefault.
+      if (e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) return;
       if (e.key === ' ' || e.key.startsWith('Arrow')) e.preventDefault();
       const k = e.key.toLowerCase();
       if (k === 'z' && !e.repeat) this.leftFist = !this.leftFist;

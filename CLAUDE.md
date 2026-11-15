@@ -43,7 +43,7 @@ source -> RokokoFrame -> parseFrame (web/src/rokoko) -> HumanHands -> Retargeter
 
 **Kantele** (`web/src/crafts/kantele/`) is separate from the bench: its own session, pluck detection, Karplus-Strong audio, and v1 recording format in `web/src/recording/`.
 
-**Globe** (home page, lazy-loaded): globe.gl with world-atlas country shapes, styled as a parchment atlas (`web/src/globe/atlas.ts`). Crafts come from `web/src/crafts/catalog.ts`. An entry's `country` must match the world-atlas name exactly (a test checks this), and its photo goes in `web/public/crafts/` (640px).
+**Globe** (home page, lazy-loaded): globe.gl with world-atlas country shapes, styled as a parchment atlas (`web/src/globe/atlas.ts`). Crafts come from `web/src/crafts/catalog.ts`: playable ones are listed there (photo in `web/public/crafts/`, 640px), and the ~330 "coming soon" crafts and instruments live in `web/src/crafts/world/<region>.ts`. Their photos are Wikimedia Commons thumbnail links in `world/photos.json`, regenerated with `node web/scripts/craft-photo-links.mjs` from each entry's `wiki` article. An entry's `country` must match the world-atlas name exactly and its pin must fall inside that country (tests check both).
 
 **Community** (`web/src/community/`) is a fake backend (localStorage + procedurally generated seeds) behind the `CommunityApi` seam.
 

@@ -16,13 +16,13 @@ import { RobotHand, type RobotPose } from '../../robot/RobotHand';
 import type { Dof6 } from '../../robot/retarget';
 import type { Side } from '../../rokoko/types';
 import { HOLD_POSES, holdPose, HOLE_NORMALS, HOLE_POSITIONS, HOLE_RADII, MODEL_POSITION, MODEL_ROTATION, MODEL_SCALE, MODEL_URL } from './stageGeometry';
+import { useOcarinaCamera } from './cameraStore';
+import { CAMERA_TARGET, CAMERA_VIEWS, easeInOut, fitFov, GLIDE_SECONDS, INSTRUMENT_TILT } from './cameraViews';
 import { HOLES, type OcarinaView } from './types';
 
 const BACKGROUND = '#efe3c6';
 const COVERED = new THREE.Color('#5fbf6e');
 const SIDES: Side[] = ['left', 'right'];
-/** Where the camera looks: the middle of the instrument, a touch towards the player. */
-const TARGET = new THREE.Vector3(0, -0.15, 0.05);
 
 type ViewSampler = () => OcarinaView;
 
@@ -46,22 +46,99 @@ function useViewSampler(getView: () => OcarinaView): ViewSampler {
   }, [clock]);
 }
 
+// Scratch objects for the camera rig, so a glide allocates nothing per frame.
+const scratchOffset = new THREE.Vector3();
+const scratchSpherical = new THREE.Spherical();
+
+type Glide = {
+  active: boolean;
+  elapsed: number;
+  fromFov: number;
+  /** Start and goal poses as offsets from CAMERA_TARGET. */
+  from: THREE.Spherical;
+  to: THREE.Spherical;
+  /** Shortest way round in azimuth, so a glide never takes the long way. */
+  dTheta: number;
+  fromRoll: number;
+  toRoll: number;
+};
+
+function aspectOf(size: { width: number; height: number }): number {
+  return size.width / Math.max(1, size.height);
+}
+
 function CameraRig() {
   const camera = useThree((s) => s.camera);
   const width = useThree((s) => s.size.width);
   const height = useThree((s) => s.size.height);
+  const view = useOcarinaCamera((s) => s.view);
+  // The view the camera is at (or gliding to); null until the first snap.
+  const goal = useRef<typeof view | null>(null);
+  const glide = useRef<Glide>({ active: false, elapsed: 0, fromFov: 38, from: new THREE.Spherical(), to: new THREE.Spherical(), dTheta: 0, fromRoll: 0, toRoll: 0 });
+  // The picture's current turn about the line of sight (see CameraView.roll).
+  const roll = useRef(0);
+
   useEffect(() => {
-    // Looking down over the player's shoulder onto the finger holes.
-    camera.position.set(0.2, 3.7, 1.55);
-    camera.lookAt(TARGET);
+    if (goal.current === null) {
+      // First mount: start at the stored view, no glide on load.
+      goal.current = view;
+      camera.position.set(...CAMERA_VIEWS[view].position);
+      roll.current = CAMERA_VIEWS[view].roll;
+      camera.lookAt(CAMERA_TARGET);
+      camera.rotateZ(roll.current);
+      if (camera instanceof THREE.PerspectiveCamera) {
+        camera.fov = fitFov(camera.position.distanceTo(CAMERA_TARGET), aspectOf({ width, height }));
+        camera.updateProjectionMatrix();
+      }
+      return;
+    }
+    if (goal.current === view) return;
+    goal.current = view;
+    // Glide from wherever the camera is now, so switching mid-glide never jumps.
+    const g = glide.current;
+    g.from.setFromVector3(scratchOffset.copy(camera.position).sub(CAMERA_TARGET));
+    g.to.setFromVector3(scratchOffset.set(...CAMERA_VIEWS[view].position).sub(CAMERA_TARGET));
+    g.dTheta = THREE.MathUtils.euclideanModulo(g.to.theta - g.from.theta + Math.PI, 2 * Math.PI) - Math.PI;
+    g.fromFov = camera instanceof THREE.PerspectiveCamera ? camera.fov : 38;
+    g.fromRoll = roll.current;
+    g.toRoll = CAMERA_VIEWS[view].roll;
+    g.elapsed = 0;
+    g.active = true;
+    // width/height only matter for the first snap; resizes are handled below.
+  }, [camera, view]);
+
+  useEffect(() => {
+    // Keep both hands (about 2.4 units across) in frame on narrow screens.
+    // Mid-glide the per-frame fov target already uses the current aspect.
+    if (glide.current.active || !(camera instanceof THREE.PerspectiveCamera)) return;
+    camera.fov = fitFov(camera.position.distanceTo(CAMERA_TARGET), aspectOf({ width, height }));
+    camera.updateProjectionMatrix();
+  }, [camera, width, height]);
+
+  useFrame((state, delta) => {
+    const g = glide.current;
+    if (!g.active) return;
+    g.elapsed += delta;
+    const t = easeInOut(g.elapsed / GLIDE_SECONDS);
+    // Round the target on a sphere (radius and elevation lerp, azimuth takes the
+    // short way), so the camera swings around the instrument and never passes
+    // straight overhead, where lookAt would spin it.
+    scratchSpherical.set(
+      THREE.MathUtils.lerp(g.from.radius, g.to.radius, t),
+      THREE.MathUtils.lerp(g.from.phi, g.to.phi, t),
+      g.from.theta + g.dTheta * t,
+    );
+    camera.position.setFromSpherical(scratchSpherical.makeSafe()).add(CAMERA_TARGET);
+    camera.lookAt(CAMERA_TARGET);
+    // lookAt keeps the floor at the bottom; then turn the picture as the view asks.
+    roll.current = THREE.MathUtils.lerp(g.fromRoll, g.toRoll, t);
+    camera.rotateZ(roll.current);
     if (camera instanceof THREE.PerspectiveCamera) {
-      // Keep both hands (about 2.4 units across) in frame on narrow screens.
-      const aspect = width / Math.max(1, height);
-      const dist = camera.position.distanceTo(TARGET);
-      camera.fov = Math.max(38, THREE.MathUtils.radToDeg(2 * Math.atan(1.25 / dist / aspect)));
+      camera.fov = THREE.MathUtils.lerp(g.fromFov, fitFov(g.to.radius, aspectOf(state.size)), t);
       camera.updateProjectionMatrix();
     }
-  }, [camera, width, height]);
+    if (g.elapsed >= GLIDE_SECONDS) g.active = false;
+  });
   return null;
 }
 
@@ -213,17 +290,22 @@ function Scene({ getView }: { getView: () => OcarinaView }) {
         <planeGeometry args={[30, 30]} />
         <meshStandardMaterial color="#e5d6b4" roughness={0.92} />
       </mesh>
-      <Suspense fallback={null}>
-        <Ocarina sample={sample} />
-      </Suspense>
-      <Hands sample={sample} />
+      {/* The instrument and hands are tipped together so the finger holes face the viewer. */}
+      <group rotation={[INSTRUMENT_TILT, 0, 0]}>
+        <Suspense fallback={null}>
+          <Ocarina sample={sample} />
+        </Suspense>
+        <Hands sample={sample} />
+      </group>
     </>
   );
 }
 
 export function OcarinaStage({ getView }: { getView: () => OcarinaView }): JSX.Element {
+  // Read once: the Canvas only uses this to create the camera; the rig takes over after.
+  const [x, y, z] = useMemo(() => CAMERA_VIEWS[useOcarinaCamera.getState().view].position, []);
   return (
-    <Canvas shadows="percentage" dpr={[1, 2]} camera={{ fov: 38, near: 0.05, far: 40, position: [0.2, 3.7, 1.55] }}>
+    <Canvas shadows="percentage" dpr={[1, 2]} camera={{ fov: 38, near: 0.05, far: 40, position: [x, y, z] }}>
       <Scene getView={getView} />
     </Canvas>
   );
