@@ -6,6 +6,7 @@
 // Hot-path data lives in the mutable `live` object (read every frame by the 3D
 // scenes, no React re-renders). The zustand store only holds slow UI state.
 
+import { useEffect } from 'react';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { parseFrame, type HumanHands } from '../rokoko/parse';
@@ -19,6 +20,16 @@ import type { HandSource, SourceKind, SourceStatus } from './types';
 import { WebcamSource } from './webcamSource';
 
 const NO_HANDS = (): HumanHands => ({ actorName: '', timestamp: 0 });
+const IDLE_STATUS: SourceStatus = { state: 'idle', message: 'No input selected' };
+/** A source is picked but nothing on screen needs hands, so the camera/bridge stays off. */
+const STANDBY_STATUS: SourceStatus = { state: 'idle', message: 'Ready: starts when a craft needs your hands' };
+
+/**
+ * How many things on screen need live hands right now (a craft page, the input drawer, the
+ * calibration wizard). The picked source only runs while this is above zero: no camera,
+ * hand tracking or bridge connection anywhere else (they cost the globe a third of its frame rate).
+ */
+let demand = 0;
 /** A source is considered gone once no frame has arrived for this long. */
 const STALE_MS = 500;
 
@@ -58,11 +69,13 @@ interface PipelineStore {
   setCalibrationContext(context: string): void;
   /** The last calibration step taken (pages that need to know your rest pose listen for it). */
   calibratedAt: { step: 'open' | 'fist'; context: string; at: number } | null;
-  /** Last source the user picked, restarted automatically on reload. */
+  /** Last source the user picked, picked again automatically on reload (it starts once needed). */
   lastKind: SourceKind | null;
   panelOpen: boolean;
   setPanelOpen(open: boolean): void;
+  /** Pick a source. It runs only while something needs live hands (see `useInputDemand`). */
   start(kind: SourceKind): Promise<void>;
+  /** Unpick the source and stop it. */
   stop(): void;
   updateSettings(s: Partial<Settings>): void;
   calibrate(step: 'open' | 'fist'): Side | null;
@@ -108,49 +121,24 @@ export const usePipeline = create<PipelineStore>()(
 
       async start(kind) {
         get().stop();
-        const { settings, calibrations, calibrationContext } = get();
-        retargeter.calibration = calibrationFor(kind, calibrations[calibrationKey(kind, calibrationContext)]);
-        // The webcam is noisier than the gloves, so smooth what it measures more:
-        // everything for the webcam alone, just positions with the gloves.
-        retargeter.dofTau = kind === 'webcam' ? 0.07 : 0.03;
-        retargeter.posTau = kind === 'webcam' || kind === 'fused' ? 0.09 : 0.04;
-
-        const source: HandSource =
-          kind === 'webcam'
-            ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands, cameraId: settings.cameraId ?? '' })
-            : kind === 'gloves'
-              ? new GlovesSource(settings.bridgeUrl)
-              : kind === 'fused'
-                ? new FusedSource(settings.bridgeUrl, settings.swapHands, settings.cameraId ?? '', settings.cameraRotation ?? 0)
-                : new KeyboardSource();
-        live.source = source;
-        set({ kind, lastKind: kind, status: { state: 'starting', message: 'Starting…' } });
-        try {
-          await source.start(onFrame, (status) => live.source === source && set({ status }));
-        } catch (e) {
-          if (live.source !== source) return;
-          const msg = e instanceof Error ? e.message : String(e);
-          set({ status: { state: 'error', message: msg } });
-        }
+        set({ kind, lastKind: kind, status: STANDBY_STATUS });
+        if (demand > 0) await runSource(kind);
       },
 
       stop() {
-        live.source?.stop();
-        live.source = null;
-        live.commands = {};
-        live.hands = NO_HANDS();
-        live.frame = null;
-        set({ kind: null, status: { state: 'idle', message: 'No input selected' }, present: { left: false, right: false }, fps: 0 });
+        haltSource();
+        set({ kind: null, status: IDLE_STATUS, present: { left: false, right: false }, fps: 0 });
       },
 
       updateSettings(s) {
         set({ settings: { ...get().settings, ...s } });
         if (live.source instanceof WebcamSource && s.swapHands !== undefined) live.source.swapHands = s.swapHands;
         if (live.source instanceof FusedSource && s.swapHands !== undefined) live.source.camera.swapHands = s.swapHands;
-        const kind = get().kind;
-        if (s.bridgeUrl !== undefined && (kind === 'gloves' || kind === 'fused')) void get().start(kind);
-        else if (s.cameraId !== undefined && (kind === 'webcam' || kind === 'fused')) void get().start(kind);
-        else if (s.cameraRotation !== undefined && kind === 'fused') void get().start(kind);
+        // Restart a running source whose connection settings changed (a stopped one picks them up when it starts).
+        const kind = live.source ? get().kind : null;
+        if (s.bridgeUrl !== undefined && (kind === 'gloves' || kind === 'fused')) void runSource(kind);
+        else if (s.cameraId !== undefined && (kind === 'webcam' || kind === 'fused')) void runSource(kind);
+        else if (s.cameraRotation !== undefined && kind === 'fused') void runSource(kind);
       },
 
       calibrate(step) {
@@ -186,6 +174,65 @@ export const usePipeline = create<PipelineStore>()(
     },
   ),
 );
+
+/** Start the picked source's hardware (camera, hand tracking, bridge connection). */
+async function runSource(kind: SourceKind) {
+  haltSource();
+  const { settings, calibrations, calibrationContext } = usePipeline.getState();
+  retargeter.calibration = calibrationFor(kind, calibrations[calibrationKey(kind, calibrationContext)]);
+  // The webcam is noisier than the gloves, so smooth what it measures more:
+  // everything for the webcam alone, just positions with the gloves.
+  retargeter.dofTau = kind === 'webcam' ? 0.07 : 0.03;
+  retargeter.posTau = kind === 'webcam' || kind === 'fused' ? 0.09 : 0.04;
+
+  const source: HandSource =
+    kind === 'webcam'
+      ? Object.assign(new WebcamSource(), { swapHands: settings.swapHands, cameraId: settings.cameraId ?? '' })
+      : kind === 'gloves'
+        ? new GlovesSource(settings.bridgeUrl)
+        : kind === 'fused'
+          ? new FusedSource(settings.bridgeUrl, settings.swapHands, settings.cameraId ?? '', settings.cameraRotation ?? 0)
+          : new KeyboardSource();
+  live.source = source;
+  usePipeline.setState({ status: { state: 'starting', message: 'Starting…' } });
+  try {
+    await source.start(onFrame, (status) => live.source === source && usePipeline.setState({ status }));
+  } catch (e) {
+    if (live.source !== source) return;
+    const msg = e instanceof Error ? e.message : String(e);
+    usePipeline.setState({ status: { state: 'error', message: msg } });
+  }
+}
+
+/** Stop the hardware, keeping the picked source. */
+function haltSource() {
+  live.source?.stop();
+  live.source = null;
+  live.commands = {};
+  live.hands = NO_HANDS();
+  live.frame = null;
+}
+
+/** Note that something needs live hands; returns the release. The picked source runs while any are held. */
+export function acquireInput(): () => void {
+  demand++;
+  const { kind } = usePipeline.getState();
+  if (demand === 1 && kind && !live.source) void runSource(kind);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    demand--;
+    if (demand > 0 || !live.source) return;
+    haltSource();
+    if (usePipeline.getState().kind) usePipeline.setState({ status: STANDBY_STATUS, present: { left: false, right: false }, fps: 0 });
+  };
+}
+
+/** Keep the picked input source running while this component is mounted (and `active`). */
+export function useInputDemand(active = true) {
+  useEffect(() => (active ? acquireInput() : undefined), [active]);
+}
 
 function onFrame(frame: RokokoFrame) {
   live.frame = frame;

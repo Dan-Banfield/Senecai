@@ -7,6 +7,7 @@ import { fingeringFor, midiToName } from '../crafts/ocarina/fingering';
 import { scheduleSong, type NoteResult } from '../crafts/ocarina/lesson';
 import { OcarinaStage } from '../crafts/ocarina/OcarinaStage';
 import { OcarinaSession, useOcarinaUi } from '../crafts/ocarina/session';
+import { useInputDemand } from '../input/pipeline';
 import { SONGS } from '../crafts/ocarina/songs';
 import { HOLES, type HoleStates } from '../crafts/ocarina/types';
 import { calibrationKey, usePipeline } from '../input/pipeline';
@@ -228,6 +229,8 @@ function RecordingCard({ session }: { session: OcarinaSession }) {
 }
 
 export default function OcarinaPage() {
+  // The picked input source (camera, gloves…) runs only while a page like this one needs it.
+  useInputDemand();
   const session = useMemo(() => new OcarinaSession(), []);
   useEffect(() => {
     session.activate();
