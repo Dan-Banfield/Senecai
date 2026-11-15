@@ -29,8 +29,11 @@ const TOP_ROW = ['L.little', 'L.ring', 'L.middle', 'L.index', 'R.index', 'R.midd
 const BACK_ROW = ['L.thumb', 'R.thumb'];
 const holeIndex = (id: string) => HOLES.findIndex((h) => h.id === id);
 
-/** Ten-dot fingering chart: filled = covered. With `target`, holes to cover are outlined and wrong holes ringed. */
-export function FingeringDiagram({ holes, target }: { holes: HoleStates; target?: HoleStates }) {
+/**
+ * Ten-dot fingering chart: filled = covered. With `target`, holes to cover are outlined and wrong holes ringed.
+ * `silent` marks a rest: holes fade and a "Wait" label sits in the middle.
+ */
+export function FingeringDiagram({ holes, target, silent = false }: { holes: HoleStates; target?: HoleStates; silent?: boolean }) {
   const dot = (id: string, x: number, y: number, r: number) => {
     const i = holeIndex(id);
     const covered = !!holes[i];
@@ -45,12 +48,20 @@ export function FingeringDiagram({ holes, target }: { holes: HoleStates; target?
     );
   };
   return (
-    <svg className="oc-diagram" viewBox="0 0 280 74" role="img" aria-label="Fingering chart">
+    <svg className={`oc-diagram${silent ? ' silent' : ''}`} viewBox="0 0 280 74" role="img" aria-label={silent ? 'Fingering chart: wait' : 'Fingering chart'}>
       <line className="oc-split" x1={140} y1={8} x2={140} y2={66} />
       {TOP_ROW.map((id, k) => dot(id, k < 4 ? 20 + k * 30 : 170 + (k - 4) * 30, 24, 10))}
       {BACK_ROW.map((id, k) => dot(id, k === 0 ? 100 : 180, 58, 7))}
       <text className="oc-label" x={6} y={70}>L</text>
       <text className="oc-label" x={268} y={70}>R</text>
+      {silent && (
+        <g className="oc-silent" aria-hidden="true">
+          <rect x={96} y={30} width={88} height={24} rx={3} />
+          <text x={140} y={46} textAnchor="middle">
+            Wait
+          </text>
+        </g>
+      )}
     </svg>
   );
 }
@@ -101,7 +112,7 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
   const from = Math.max(0, Math.min(current - 1, events.length - 8));
   const lane = events.slice(from, from + 8);
   const progress = following && take ? Math.min(1, time / take.durationMs) : 0;
-  const noteLabel = (midi: number | null) => (midi === null ? 'rest' : midiToName(midi));
+  const noteLabel = (midi: number | null) => (midi === null ? 'wait' : midiToName(midi));
 
   const choose = (value: string) => {
     if (following) session.stopReplay();
@@ -184,7 +195,11 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
               </span>
             ))}
           </div>
-          {targetHoles && <FingeringDiagram holes={following ? holes : targetHoles} target={targetHoles} />}
+          {targetHoles ? (
+            <FingeringDiagram holes={following ? holes : targetHoles} target={targetHoles} />
+          ) : (
+            ev && <FingeringDiagram holes={following ? holes : HOLES.map(() => false)} silent />
+          )}
           <div className="meter" style={{ marginTop: 10 }}>
             <div style={{ width: `${progress * 100}%` }} />
           </div>
