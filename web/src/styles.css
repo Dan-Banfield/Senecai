@@ -64,7 +64,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 .source-pill:hover { border-color: var(--birch-dim); box-shadow: inset 0 0 0 2px var(--ink-2), inset 0 0 0 3px var(--birch-dim); }
 .source-pill:focus-visible { outline: 2px solid var(--forest); outline-offset: 2px; }
 .cart-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.1; }
-.cart-cap { font-size: 9.5px; font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); }
 .cart-name { font-family: var(--display); font-style: italic; font-size: 17px; font-weight: 600; color: var(--birch); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cart-hands { display: flex; gap: 5px; margin-left: 4px; padding-left: 10px; border-left: 1px solid var(--line); align-self: stretch; align-items: center; font-family: var(--mono); font-size: 11px; font-weight: 600; }
 .cart-hands .on { color: var(--birch); }
@@ -81,7 +80,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 @media (prefers-reduced-motion: reduce) { .cart-mark.starting { animation: none; } }
 @media (max-width: 640px) {
   .source-pill { max-width: 190px; padding: 6px 10px; }
-  .cart-cap { display: none; }
   .cart-name { font-size: 15px; }
 }
 .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); flex: none; }
