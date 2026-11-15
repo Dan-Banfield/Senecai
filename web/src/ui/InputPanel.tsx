@@ -141,7 +141,6 @@ export function InputPanel() {
         <header className="inp-head">
           <div>
             <h2>Hand input</h2>
-            <p className="inp-eyebrow">How the robot reads your hands</p>
           </div>
           <button className="oc-icon-btn ghost" onClick={() => setPanelOpen(false)} aria-label="Close" title="Close (Esc)">
             <Icon name="close" />

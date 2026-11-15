@@ -173,9 +173,8 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 }
 @keyframes inp-slide { from { transform: translateX(24px); opacity: 0; } }
 @keyframes inp-fade { from { opacity: 0; } }
-.inp-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; padding: 20px 20px 14px; border-bottom: 1px solid rgba(78, 61, 43, 0.25); }
+.inp-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 20px 14px; border-bottom: 1px solid rgba(78, 61, 43, 0.25); }
 .inp-head h2 { font-size: 26px; line-height: 1.05; font-variant: small-caps; letter-spacing: 0.03em; }
-.inp-eyebrow { margin: 2px 0 0; font-family: var(--display); font-style: italic; font-size: 15px; color: var(--forest); }
 
 .inp-sources { display: flex; flex-direction: column; padding: 6px 10px; border-bottom: 1px solid rgba(78, 61, 43, 0.25); }
 .inp-source { display: grid; grid-template-columns: 38px 1fr 16px; align-items: center; gap: 12px; padding: 11px 10px; text-align: left; background: none; border: 1px solid transparent; border-radius: 3px; color: var(--birch); transition: background 0.15s, border-color 0.15s; }
