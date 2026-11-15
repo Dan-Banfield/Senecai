@@ -20,6 +20,8 @@
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
     "three": "^0.187.0",
+    "three-conic-polygon-geometry": "^2.1.5",
+    "three-geojson-geometry": "^2.1.2",
     "topojson-client": "^3.1.0",
     "world-atlas": "^2.0.2",
     "zustand": "^5.1.0"

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { calibrationKey, usePipeline } from '../input/pipeline';
+import { calibrationKey, useInputDemand, usePipeline } from '../input/pipeline';
 import { KEYBOARD_HELP } from '../input/keyboardSource';
 import type { Rotation } from '../input/gloveTracker';
 import { SOURCE_LABELS, type SourceKind } from '../input/types';
@@ -24,6 +24,8 @@ export function SourcePill() {
 }
 
 export function CalibrationWizard({ onClose }: { onClose: () => void }) {
+  // Calibrating reads live hands.
+  useInputDemand();
   const calibrate = usePipeline((s) => s.calibrate);
   const [step, setStep] = useState<'open' | 'fist' | 'done'>('open');
   const [count, setCount] = useState(3);
@@ -94,6 +96,8 @@ export function InputPanel() {
   const [calibrating, setCalibrating] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState(settings.bridgeUrl);
   const cameras = useCameras(panelOpen, status.state);
+  // The drawer shows the live input (status, fps, camera preview), so the source runs while it is open.
+  useInputDemand(panelOpen);
   if (!panelOpen) return calibrating ? <CalibrationWizard onClose={() => setCalibrating(false)} /> : null;
 
   return (

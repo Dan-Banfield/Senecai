@@ -35,7 +35,7 @@ source -> RokokoFrame -> parseFrame (web/src/rokoko) -> HumanHands -> Retargeter
 
 `web/src/rokoko/build.ts` builds frames via FK for the synthetic sources; the bridge converts Device SDK data (RGMP from rkk-hand-solver, OpenXR joints) into the same JSON v3 before forwarding. Do not add source-specific logic downstream of the frame.
 
-**Hot path vs UI state** (`web/src/input/pipeline.ts`): per-frame data lives in the mutable `live` object, which 3D scenes read every frame without React re-renders. The zustand store (`usePipeline`, persisted) holds only slow UI state: source kind, settings, calibration.
+**Hot path vs UI state** (`web/src/input/pipeline.ts`): per-frame data lives in the mutable `live` object, which 3D scenes read every frame without React re-renders. The zustand store (`usePipeline`, persisted) holds only slow UI state: source kind, settings, calibration. Picking a source does not start it: the camera/tracking/bridge only run while something holds an input demand (`useInputDemand()` in a page that reads hands, the open input drawer, the calibration wizard). A new craft page that reads `live` must call `useInputDemand()`.
 
 **Robot model**: an Inspire RH56-style hand with 6 DoF (thumb rotate, thumb bend, one per finger). Retargeting sums each finger's flexion and normalises it against the user's open/fist calibration. `toInspireAngles` produces `0..1000` commands (1000 = open), which are streamed to the bridge. `bridge/src/robot-output.js` is the stub where the real hand would connect.
 

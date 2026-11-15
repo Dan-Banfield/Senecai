@@ -65,7 +65,7 @@ export function countryView(f: CountryFeature): { lat: number; lng: number; span
 /** Camera altitude (in globe radii) that frames a region of the given angular size. */
 export const altitudeForSpan = (spanDeg: number) => Math.min(2.4, Math.max(0.42, spanDeg * 0.028 + 0.1));
 
-function inRingPlanar(ring: Position[], x: number, y: number) {
+export function inRingPlanar(ring: Position[], x: number, y: number) {
   let inside = false;
   for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
     const [xi, yi] = ring[i];
@@ -76,7 +76,7 @@ function inRingPlanar(ring: Position[], x: number, y: number) {
 }
 
 /** Ray-casting point-in-ring, made safe for rings that cross the antimeridian (e.g. Russia, Fiji). */
-function inRing(ring: Position[], lng: number, lat: number) {
+export function inRing(ring: Position[], lng: number, lat: number) {
   const crosses = ring.some(([x], i) => i > 0 && Math.abs(x - ring[i - 1][0]) > 180);
   if (!crosses) return inRingPlanar(ring, lng, lat);
   const wrap = (x: number) => (x < 0 ? x + 360 : x);

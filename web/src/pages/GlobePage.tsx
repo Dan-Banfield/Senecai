@@ -2,12 +2,18 @@
 // it, click a country to land there, and hover the pins to see its crafts.
 
 import Globe, { type GlobeInstance } from 'globe.gl';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { MeshLambertMaterial } from 'three';
+import { MeshLambertMaterial, type Object3D } from 'three';
 import { CRAFTS, craftById, type CraftInfo } from '../crafts/catalog';
-import { ATLAS_INKS, CRAFT_INK, fadeLimb, graticule, INK, inked, labelElement, mapLabels, seaTexture, zoomBand, type MapLabel } from '../globe/atlas';
+import { ATLAS_INKS, CRAFT_INK, labelElement, mapLabels, seaTexture, zoomBand } from '../globe/atlas';
 import { altitudeForSpan, countryAt, countryView, distanceKm, loadCountries, mapColours, type CountryFeature } from '../globe/geo';
+import { createCountryIndex } from '../globe/hit';
+import { createAtlasLayers, type AtlasLayers } from '../globe/layers';
+import { createRenderLoop, tryFindGlobeObject, type RenderLoop } from '../globe/loop';
+import { createOverlay, createTooltip, type Overlay, type OverlayItem } from '../globe/overlay';
+import { globeCoordsAt } from '../globe/pick';
+import { createGlobeShadow } from '../globe/shadow';
 
 type Pin =
   | { id: string; kind: 'craft'; lat: number; lng: number; craft: CraftInfo }
@@ -20,17 +26,10 @@ const CARD_W = 300;
 const CLUSTER_ABOVE = 1.3;
 const UNCLUSTER_BELOW = 1.1;
 const CLUSTER_MIN_PINS = 3;
-/** Countries with something playable get the highlight ink; nearly every country has "coming soon" crafts. */
-const CRAFT_COUNTRIES = new Set(CRAFTS.filter((c) => c.status === 'playable').map((c) => c.country));
-/** Country cap materials, one per colour, lit so the globe shades towards its edge like a printed sphere. */
-const capMaterials = new Map<string, MeshLambertMaterial>();
-const capMaterial = (color: string) => {
-  let m = capMaterials.get(color);
-  if (!m) capMaterials.set(color, (m = new MeshLambertMaterial({ color })));
-  return m;
-};
+const CRAFT_COUNTRIES = new Set(CRAFTS.map((c) => c.country));
+/** Map labels and pins sit just above the country caps. */
+const HTML_ALT = 0.008;
 
-const countryName = (d: object) => (d as CountryFeature).properties.name;
 const esc = (s: string) => s.replace(/[&<>"]/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[ch]!);
 
 /** Mean of points on the sphere (safe across the antimeridian). */
@@ -188,6 +187,12 @@ export default function GlobePage() {
   const cardRef = useRef<HTMLDivElement>(null);
   const leaderRef = useRef<HTMLDivElement>(null);
   const globeRef = useRef<GlobeInstance | null>(null);
+  const loopRef = useRef<RenderLoop | null>(null);
+  const layersRef = useRef<AtlasLayers | null>(null);
+  const overlayRef = useRef<Overlay | null>(null);
+  const pinsRef = useRef<Pin[]>([]);
+  const itemsRef = useRef<OverlayItem[]>([]);
+  const pendingFlyRef = useRef<((loop: RenderLoop) => void) | null>(null);
   const countries = useMemo(loadCountries, []);
   const inks = useMemo(() => mapColours(countries, ATLAS_INKS.length), [countries]);
   const labels = useMemo(() => mapLabels(countries), [countries]);
@@ -224,21 +229,16 @@ export default function GlobePage() {
     if (pin.kind === 'cluster') landIn(pin.country);
     else if (pin.craft.route) navigate(pin.craft.route);
   };
-  const handlers = useRef<PinHandlers>({ enter: showCard, leave: scheduleHide, click: openPin });
-  handlers.current = { enter: showCard, leave: scheduleHide, click: openPin };
+  // Pin elements outlive rebuilds of the pin list (the overlay keeps elements by id), so resolve the current pin.
+  const currentPin = (pin: Pin) => pinsRef.current.find((p) => p.id === pin.id) ?? pin;
+  const pinHandlers = (): PinHandlers => ({ enter: (p) => showCard(currentPin(p)), leave: scheduleHide, click: (p) => openPin(currentPin(p)) });
+  const handlers = useRef<PinHandlers>(pinHandlers());
+  handlers.current = pinHandlers();
 
+  /** Raise and darken the hovered and selected countries. */
   const refreshPolygons = () => {
-    const g = globeRef.current;
-    if (!g) return;
-    const hov = hoverCountryRef.current;
-    const sel = selectedRef.current?.properties.name;
-    g.polygonCapMaterial((d: object) => {
-      const n = countryName(d);
-      const fill = CRAFT_COUNTRIES.has(n) ? CRAFT_INK : ATLAS_INKS[inks.get(n) ?? 0];
-      return capMaterial(n === sel ? inked(fill, 0.22) : n === hov ? inked(fill, 0.12) : fill);
-    })
-      .polygonSideColor((d: object) => (countryName(d) === hov || countryName(d) === sel ? 'rgba(78,61,43,0.45)' : 'rgba(0,0,0,0)'))
-      .polygonAltitude((d: object) => (countryName(d) === sel ? 0.02 : countryName(d) === hov ? 0.014 : 0.005));
+    layersRef.current?.setHighlight(hoverCountryRef.current, selectedRef.current?.properties.name ?? null);
+    loopRef.current?.invalidate();
   };
 
   const selectCountry = (f: CountryFeature | null) => {
@@ -256,12 +256,18 @@ export default function GlobePage() {
     // Keep the landed country centred in the space beside the panel.
     const offset = f && (wrapRef.current?.clientWidth ?? 0) > 900 ? 180 : 0;
     g.globeOffset([offset, 0]);
-    if (f) {
-      const v = countryView(f);
-      g.pointOfView({ lat: v.lat, lng: v.lng, altitude: altitudeForSpan(v.spanDeg) }, 1300);
-    } else {
-      g.pointOfView({ ...g.pointOfView(), altitude: HOME_POV.altitude }, 1100);
-    }
+    const fly = (loop: RenderLoop) => {
+      if (f) {
+        const v = countryView(f);
+        loop.flyTo({ lat: v.lat, lng: v.lng, altitude: altitudeForSpan(v.spanDeg) }, 1300);
+      } else {
+        loop.flyTo({ ...g.pointOfView(), altitude: HOME_POV.altitude }, 1100);
+      }
+    };
+    // A deep link can select before the render loop exists (it waits on globe.gl); fly once it does.
+    if (loopRef.current) fly(loopRef.current);
+    else pendingFlyRef.current = fly;
+    tooltipHideRef.current();
     refreshPolygons();
   };
   const selectRef = useRef(selectCountry);
@@ -276,143 +282,225 @@ export default function GlobePage() {
   };
   const dismissRef = useRef(dismiss);
   dismissRef.current = dismiss;
+  const tooltipHideRef = useRef(() => {});
 
   // Create the globe once.
   useEffect(() => {
     const mount = mountRef.current!;
     const wrap = wrapRef.current!;
 
-    const g = new Globe(mount, { animateIn: true, rendererConfig: { antialias: true, alpha: true } })
+    // Countries, borders, graticule, labels and pins are drawn by our own merged layers (globe/layers.ts,
+    // globe/overlay.ts) rather than globe.gl's per-object layers, and globe.gl's always-on loop is paused in
+    // favour of an on-demand one (globe/loop.ts). globe.gl still provides the scene, camera, controls and sea.
+    const g = new Globe(mount, { animateIn: false, rendererConfig: { antialias: true, alpha: true } })
       // Transparent: the parchment behind the canvas is the page itself.
       .backgroundColor('rgba(0,0,0,0)')
       .globeMaterial(new MeshLambertMaterial({ map: seaTexture() }))
       .showAtmosphere(false)
-      .polygonsData(countries)
-      .polygonsTransitionDuration(260)
-      .polygonStrokeColor(() => INK)
-      .pathsData(graticule())
-      .pathPoints('pts')
-      .pathPointLat((p: [number, number]) => p[0])
-      .pathPointLng((p: [number, number]) => p[1])
-      .pathPointAlt(0.0062)
-      .pathColor(() => 'rgba(78,61,43,0.22)')
-      .pathStroke(null)
-      .pathTransitionDuration(0)
-      .polygonLabel((d: object) => {
-        const name = countryName(d);
-        const crafts = CRAFTS.filter((c) => c.country === name).length;
-        return `<div class="country-tip"><b>${esc(name)}</b><span>${crafts ? `${crafts} craft${crafts > 1 ? 's' : ''}` : 'click to land'}</span></div>`;
-      })
-      .onPolygonHover((d: object | null) => {
-        hoverCountryRef.current = d ? countryName(d) : null;
-        refreshPolygons();
-      })
       .onZoom(({ altitude }) => {
         // Letter more of the map the closer you are.
         const band = zoomBand(altitude);
         if (wrap.dataset.zoom !== band) wrap.dataset.zoom = band;
-        fadeLimb(mount, g.pointOfView());
         const want = altitude > CLUSTER_ABOVE ? true : altitude < UNCLUSTER_BELOW ? false : clusteredRef.current;
         if (want !== clusteredRef.current) {
           clusteredRef.current = want;
           setClustered(want);
         }
       })
-      .htmlElementsData([])
-      .htmlLat('lat')
-      .htmlLng('lng')
-      .htmlAltitude(0.008)
-      .htmlElement((d: object) => ((d as MapLabel).kind === 'label' ? labelElement(d as MapLabel) : pinElement(d as Pin, handlers)))
-      .htmlElementVisibilityModifier((el: HTMLElement, visible: boolean) => el.classList.toggle('pin-hidden', !visible))
       .pointOfView(HOME_POV, 0);
+    g.pauseAnimation();
     globeRef.current = g;
     if (import.meta.env.DEV) (window as unknown as { senecaiGlobe: GlobeInstance }).senecaiGlobe = g;
-    refreshPolygons();
 
     g.renderer().setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     const controls = g.controls();
     controls.autoRotate = false;
     controls.maxDistance = 100 * (1 + 4);
 
-    wrap.dataset.zoom = zoomBand(HOME_POV.altitude);
+    // globe.gl adds its ThreeGlobe object to the scene in a debounced update just after construction;
+    // everything below hangs off it, so wait for it (a frame at most).
+    let cleanupInit = () => {};
+    let globeReady = false;
+    let onReady = () => {};
+    g.onGlobeReady(() => {
+      globeReady = true;
+      onReady();
+    });
+    let waitRaf = 0;
+    const waitForGlobe = () => {
+      const globeObj = tryFindGlobeObject(g);
+      if (globeObj) cleanupInit = init(globeObj);
+      else waitRaf = requestAnimationFrame(waitForGlobe);
+    };
+    const init = (globeObj: Object3D) => {
+      const layers = createAtlasLayers(countries, (n) => (CRAFT_COUNTRIES.has(n) ? CRAFT_INK : ATLAS_INKS[inks.get(n) ?? 0]));
+      globeObj.add(layers.object);
+      layersRef.current = layers;
 
-    const ro = new ResizeObserver(() => g.width(wrap.clientWidth).height(wrap.clientHeight));
-    ro.observe(wrap);
+      const sceneEl = g.renderer().domElement.parentElement!;
+      const overlay = createOverlay();
+      sceneEl.appendChild(overlay.root);
+      overlayRef.current = overlay;
+      overlay.setItems(itemsRef.current);
+      const tooltip = createTooltip(sceneEl);
+      tooltipHideRef.current = () => tooltip.hide();
+      // The soft printed shadow and inked rim, as a cheap element behind the canvas instead of a CSS filter on it.
+      const shadow = createGlobeShadow();
+      mount.insertBefore(shadow.el, mount.firstChild);
 
-    // Clicks (not drags) on the map. We work out what is under the cursor ourselves rather than
-    // use globe.gl's click callbacks: those ignore empty space and lag behind the pointer.
-    //  - world view: a country lands there; ocean or space does nothing.
-    //  - focused on a country: anything outside it (another country, ocean, space) zooms back out.
-    // Pins stop their own events, so they never reach here.
-    let down: { x: number; y: number } | null = null;
-    const onDown = (e: PointerEvent) => {
-      down = { x: e.clientX, y: e.clientY };
-    };
-    const onUp = (e: PointerEvent) => {
-      const dragged = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6;
-      down = null;
-      if (dragged || e.button !== 0) return;
-      const rect = mount.getBoundingClientRect();
-      const at = g.toGlobeCoords(e.clientX - rect.left, e.clientY - rect.top);
-      const name = at ? countryAt(countries, at.lat, at.lng) : undefined;
-      const sel = selectedRef.current;
-      if (sel) {
-        if (name !== sel.properties.name) dismissRef.current();
-      } else if (name) {
-        const f = countries.find((c) => c.properties.name === name);
-        if (f) selectRef.current(f);
-      }
-    };
-    mount.addEventListener('pointerdown', onDown);
-    mount.addEventListener('pointerup', onUp);
-    const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement | null;
-      if (e.key !== 'Escape' || t?.closest('input, textarea, select')) return;
-      dismissRef.current();
-    };
-    window.addEventListener('keydown', onKey);
+      // Size the canvas to the page before the first frame (otherwise it starts window-sized).
+      // Page size and position, cached so per-frame and per-pointer-move code never reads layout.
+      const size = { w: wrap.clientWidth, h: wrap.clientHeight, left: 0, top: 0 };
+      const measure = () => {
+        const r = mount.getBoundingClientRect();
+        size.w = wrap.clientWidth;
+        size.h = wrap.clientHeight;
+        size.left = r.left;
+        size.top = r.top;
+      };
+      measure();
+      g.width(size.w).height(size.h);
+      const loop = createRenderLoop(g);
+      loopRef.current = loop;
+      refreshPolygons();
+      pendingFlyRef.current?.(loop);
+      pendingFlyRef.current = null;
 
-    // Per-frame: keep the hover card pinned to its dot.
-    let raf = 0;
-    let fadedAt = 0;
-    const tick = () => {
-      raf = requestAnimationFrame(tick);
-      // Labels are created by globe.gl on its own schedule; keep their edge-fade current.
-      const now = performance.now();
-      if (now - fadedAt > 250) {
-        fadedAt = now;
-        fadeLimb(mount, g.pointOfView());
-      }
-      const pin = hoverRef.current;
-      const card = cardRef.current;
-      const leader = leaderRef.current;
-      if (!pin || !card || !leader) return;
-      const { x, y } = g.getScreenCoords(pin.lat, pin.lng, 0.008);
-      const w = wrap.clientWidth;
-      const h = wrap.clientHeight;
-      const ch = card.offsetHeight;
-      const right = x + 28 + CARD_W < w - 12;
-      const left = right ? x + 28 : x - 28 - CARD_W;
-      const top = Math.min(h - ch - 14, Math.max(76, y - ch * 0.32));
-      card.style.transform = `translate(${left}px, ${top}px)`;
-      // Leader line from the dot to the card's edge.
-      const ex = right ? left : left + CARD_W;
-      const ey = Math.min(top + ch - 20, Math.max(top + 20, y));
-      const len = Math.hypot(ex - x, ey - y);
-      leader.style.width = `${len}px`;
-      leader.style.transform = `translate(${x}px, ${y}px) rotate(${Math.atan2(ey - y, ex - x)}rad)`;
-      const hidden = !!mount.querySelector(`[data-pin-id="${pin.id}"].pin-hidden`);
-      card.style.opacity = leader.style.opacity = hidden ? '0' : '1';
+      wrap.dataset.zoom = zoomBand(HOME_POV.altitude);
+
+      const ro = new ResizeObserver(() => {
+        measure();
+        g.width(size.w).height(size.h);
+        loop.invalidate();
+      });
+      ro.observe(wrap);
+
+      // Hover: which country is under the pointer, worked out at most once a frame from the pointer position
+      // (globe.gl raycast every country mesh every 50ms, even with the mouse still). Not while dragging.
+      const index = createCountryIndex(countries);
+      const tipHtml = (name: string) => {
+        const crafts = CRAFTS.filter((c) => c.country === name).length;
+        return `<div class="country-tip"><b>${esc(name)}</b><span>${crafts ? `${crafts} craft${crafts > 1 ? 's' : ''}` : 'click to land'}</span></div>`;
+      };
+      let hoverRaf = 0;
+      let lastMove: PointerEvent | null = null;
+      const updateHover = () => {
+        hoverRaf = 0;
+        const e = lastMove;
+        if (!e) return;
+        const at = globeCoordsAt(g.camera(), globeObj, e.clientX - size.left, e.clientY - size.top, size.w, size.h);
+        const name = at ? (index.at(at.lat, at.lng) ?? null) : null;
+        if (name !== hoverCountryRef.current) {
+          hoverCountryRef.current = name;
+          refreshPolygons();
+        }
+        if (name) tooltip.show(tipHtml(name), e.clientX, e.clientY);
+        else tooltip.hide();
+      };
+      const onMove = (e: PointerEvent) => {
+        if (e.buttons) return;
+        lastMove = e;
+        if (!hoverRaf) hoverRaf = requestAnimationFrame(updateHover);
+      };
+      const onLeave = () => {
+        lastMove = null;
+        cancelAnimationFrame(hoverRaf);
+        hoverRaf = 0;
+        tooltip.hide();
+        if (hoverCountryRef.current) {
+          hoverCountryRef.current = null;
+          refreshPolygons();
+        }
+      };
+      mount.addEventListener('pointermove', onMove);
+      mount.addEventListener('pointerleave', onLeave);
+
+      // Clicks (not drags) on the map. We work out what is under the cursor ourselves rather than
+      // use globe.gl's click callbacks: those ignore empty space and lag behind the pointer.
+      //  - world view: a country lands there; ocean or space does nothing.
+      //  - focused on a country: anything outside it (another country, ocean, space) zooms back out.
+      // Pins stop their own events, so they never reach here.
+      let down: { x: number; y: number } | null = null;
+      const onDown = (e: PointerEvent) => {
+        down = { x: e.clientX, y: e.clientY };
+      };
+      const onUp = (e: PointerEvent) => {
+        const dragged = !down || Math.hypot(e.clientX - down.x, e.clientY - down.y) > 6;
+        down = null;
+        if (dragged || e.button !== 0) return;
+        const at = globeCoordsAt(g.camera(), globeObj, e.clientX - size.left, e.clientY - size.top, size.w, size.h);
+        const name = at ? countryAt(countries, at.lat, at.lng) : undefined;
+        const sel = selectedRef.current;
+        if (sel) {
+          if (name !== sel.properties.name) dismissRef.current();
+        } else if (name) {
+          const f = countries.find((c) => c.properties.name === name);
+          if (f) selectRef.current(f);
+        }
+      };
+      mount.addEventListener('pointerdown', onDown);
+      mount.addEventListener('pointerup', onUp);
+      const onKey = (e: KeyboardEvent) => {
+        const t = e.target as HTMLElement | null;
+        if (e.key !== 'Escape' || t?.closest('input, textarea, select')) return;
+        dismissRef.current();
+      };
+      window.addEventListener('keydown', onKey);
+
+      // Per rendered frame (the loop only renders when something changed).
+      const removeTicker = loop.addTicker((f) => {
+        const { w, h } = size;
+        shadow.update(g.camera(), globeObj, w, h);
+        overlay.update(g.camera(), globeObj, w, h, zoomBand(g.pointOfView().altitude));
+        // Keep the hover card pinned to its dot.
+        const pin = hoverRef.current;
+        const card = cardRef.current;
+        const leader = leaderRef.current;
+        if (pin && card && leader) {
+          const { x, y } = g.getScreenCoords(pin.lat, pin.lng, HTML_ALT);
+          const ch = card.offsetHeight;
+          const right = x + 28 + CARD_W < w - 12;
+          const left = right ? x + 28 : x - 28 - CARD_W;
+          const top = Math.min(h - ch - 14, Math.max(76, y - ch * 0.32));
+          card.style.transform = `translate(${left}px, ${top}px)`;
+          // Leader line from the dot to the card's edge.
+          const ex = right ? left : left + CARD_W;
+          const ey = Math.min(top + ch - 20, Math.max(top + 20, y));
+          const len = Math.hypot(ex - x, ey - y);
+          leader.style.width = `${len}px`;
+          leader.style.transform = `translate(${x}px, ${y}px) rotate(${Math.atan2(ey - y, ex - x)}rad)`;
+          card.style.opacity = leader.style.opacity = overlay.isHidden(pin.id) ? '0' : '1';
+        }
+        return layers.update(f.now);
+      });
+      // three-globe signals readiness asynchronously; play its build-in animation then.
+      if (globeReady) loop.playIntro();
+      else onReady = () => loop.playIntro();
+      return () => {
+        removeTicker();
+        cancelAnimationFrame(hoverRaf);
+        loop.dispose();
+        ro.disconnect();
+        mount.removeEventListener('pointermove', onMove);
+        mount.removeEventListener('pointerleave', onLeave);
+        mount.removeEventListener('pointerdown', onDown);
+        mount.removeEventListener('pointerup', onUp);
+        window.removeEventListener('keydown', onKey);
+        tooltipHideRef.current = () => {};
+        tooltip.dispose();
+        overlay.dispose();
+        layers.dispose();
+        shadow.el.remove();
+        loopRef.current = null;
+        layersRef.current = null;
+        overlayRef.current = null;
+      };
     };
-    tick();
+    waitForGlobe();
 
     return () => {
-      cancelAnimationFrame(raf);
-      ro.disconnect();
-      mount.removeEventListener('pointerdown', onDown);
-      mount.removeEventListener('pointerup', onUp);
-      window.removeEventListener('keydown', onKey);
-      g.pauseAnimation();
+      cancelAnimationFrame(waitRaf);
+      cleanupInit();
       g._destructor();
       globeRef.current = null;
       mount.innerHTML = '';
@@ -425,9 +513,14 @@ export default function GlobePage() {
     const g = globeRef.current;
     if (!g) return;
     const pins = buildPins(clustered, openCountry);
-    g.htmlElementsData([...labels, ...pins]);
-    // New elements start visible; settle which side of the globe they're on.
-    requestAnimationFrame(() => mountRef.current && fadeLimb(mountRef.current, g.pointOfView()));
+    pinsRef.current = pins;
+    const items: OverlayItem[] = [
+      ...labels.map((l): OverlayItem => ({ id: l.id, lat: l.lat, lng: l.lng, alt: HTML_ALT, kind: 'label', tier: l.tier, style: l.style, make: () => labelElement(l) })),
+      ...pins.map((p): OverlayItem => ({ id: p.id, lat: p.lat, lng: p.lng, alt: HTML_ALT, kind: 'pin', make: () => pinElement(p, handlers) })),
+    ];
+    itemsRef.current = items;
+    overlayRef.current?.setItems(items);
+    loopRef.current?.invalidate();
     // Pin objects are rebuilt: keep an open card on its new pin, or close it if that pin is gone.
     // A craft picked from search only gets a pin once we've landed in its country.
     const pending = pendingCraftRef.current;
@@ -441,6 +534,9 @@ export default function GlobePage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [clustered, openCountry]);
+
+  // The hover card is positioned by the render loop; give it a frame when it opens or changes.
+  useLayoutEffect(() => loopRef.current?.invalidate(), [hover]);
 
   // Search results arrive as `/?country=…` or `/?craft=…`.
   useEffect(() => {
@@ -468,7 +564,7 @@ export default function GlobePage() {
   }, [selected]);
 
   const focusCraft = (craft: CraftInfo) => {
-    const pin = globeRef.current?.htmlElementsData().find((p) => (p as Pin).id === `craft-${craft.id}`) as Pin | undefined;
+    const pin = pinsRef.current.find((p) => p.id === `craft-${craft.id}`);
     if (pin) showCard(pin);
   };
 
