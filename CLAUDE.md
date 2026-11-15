@@ -47,6 +47,10 @@ source -> RokokoFrame -> parseFrame (web/src/rokoko) -> HumanHands -> Retargeter
 
 **Community** (`web/src/community/`) is a fake backend (localStorage + procedurally generated seeds) behind the `CommunityApi` seam.
 
+## Hosting
+
+Vercel serves `web/dist` as a static SPA (`vercel.json` at the root holds the build settings and the rewrite to `index.html`). The bridge is never hosted: it runs on the demo machine. The ocarina Song Market (`web/src/crafts/ocarina/market/`) picks its `SongStorage` in `index.ts`: `SupabaseStorage` when `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` are set (shared, anonymous auth, RLS in `supabase/migrations/`), else `IdbStorage`. Schema changes go in a new migration file. README.md "Hosting" has the deploy steps.
+
 ## Debugging
 
 In dev, `window.senecaiKantele`, `window.senecaiBench` and `window.senecaiGlobe` expose the running kantele session, workbench session and globe.gl instance.
