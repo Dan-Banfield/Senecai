@@ -1,5 +1,5 @@
-// Fake local market backend: seeded songs (generated on demand, never stored)
-// plus this browser's uploads in a SongStorage.
+// Market backend: seeded songs (generated on demand, never stored) plus uploads
+// in a SongStorage (this browser's IndexedDB, or Supabase when configured).
 
 import type { Take } from '../types';
 import { noteRangeOf, seedMeta, songToTake } from './generate';
@@ -35,8 +35,8 @@ export class LocalMarket implements SongMarketApi {
     this.seedMetas ??= [...this.seeds.values()].map(seedMeta);
     const seeds = this.seedMetas.map((m) => ({ ...m }));
     try {
-      const mine = await this.storage.getAll();
-      return [...seeds, ...mine.map(toMeta)];
+      const mine = this.storage.listMeta ? await this.storage.listMeta() : (await this.storage.getAll()).map(toMeta);
+      return [...seeds, ...mine];
     } catch (err) {
       if (!this.warned) {
         this.warned = true;
@@ -57,8 +57,7 @@ export class LocalMarket implements SongMarketApi {
       const meta = seedMeta(seed);
       return { ...meta, durationMs: take.durationMs, noteRange: noteRangeOf(take), take: structuredClone(take) };
     }
-    const mine = await this.storage.getAll();
-    return mine.find((s) => s.id === id);
+    return this.stored(id);
   }
 
   async publish(take: Take, input: PublishInput): Promise<MarketSongMeta> {
@@ -90,8 +89,8 @@ export class LocalMarket implements SongMarketApi {
   async remove(id: string): Promise<void> {
     const notMine = new Error('You can only delete your own songs.');
     if (this.seeds.has(id)) throw notMine;
-    const mine = await this.storage.getAll();
-    if (!mine.some((s) => s.id === id)) throw notMine;
+    const song = await this.stored(id);
+    if (!song?.mine) throw notMine;
     await this.storage.delete(id);
     this.notify();
   }
@@ -101,6 +100,11 @@ export class LocalMarket implements SongMarketApi {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  private async stored(id: string): Promise<MarketSong | undefined> {
+    if (this.storage.get) return this.storage.get(id);
+    return (await this.storage.getAll()).find((s) => s.id === id);
   }
 
   private notify(): void {

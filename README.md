@@ -27,6 +27,17 @@ Open the app, click **Choose input** (top right), then pick one:
 
 Calibrate (open hand, then fist; about 6 seconds) from the same panel. It makes a big difference.
 
+## Hosting (Vercel + Supabase, free tiers)
+
+The web app is a static site; `vercel.json` at the repo root configures the build (`npm run build`, output `web/dist`) and the SPA fallback so deep links like `/craft/ocarina` work. The glove **bridge stays on the demo machine**: the hosted page connects to `ws://localhost:14044` (browsers allow localhost from https pages; recent Chrome may ask for local network access the first time).
+
+The ocarina Song Market uses Supabase when `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` are set at build time: uploads are shared by every visitor, and each visitor gets an anonymous Supabase identity on their first publish so only they can delete their songs. Without those variables (local dev, offline demos) the market keeps uploads in the browser's IndexedDB, as before.
+
+1. **Supabase** (free project): in the SQL editor, run `supabase/migrations/20261115000000_ocarina_songs.sql` (or `supabase db push` with the CLI). Then turn on **Authentication → Sign In / Providers → Allow anonymous sign-ins**. Copy the project URL and the anon (publishable) key from **Project Settings → API**.
+2. **Vercel** (Hobby): import the GitHub repo and keep the root directory as the repo root (the settings come from `vercel.json`). Under **Environment Variables**, add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, then deploy.
+
+To try the shared market locally, copy `web/.env.example` to `web/.env.local` and fill it in. Free Supabase projects pause after a week without traffic; resume them from the dashboard.
+
 ## How "plug in the gloves and it just works" is achieved
 
 Every input source emits the **same Rokoko Studio JSON v3 frame format**. Everything downstream only ever sees those frames:

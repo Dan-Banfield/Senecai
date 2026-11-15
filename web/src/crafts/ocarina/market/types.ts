@@ -50,11 +50,19 @@ export interface SongMarketApi {
   subscribe(listener: () => void): () => void;
 }
 
-/** Persistence for uploaded (mine) songs. IndexedDB in the browser, in-memory in tests. */
+/**
+ * Persistence for uploaded songs. IndexedDB in the browser (all songs are this
+ * browser's own), Supabase when configured (shared by everyone; `mine` marks
+ * the visitor's own), in-memory in tests.
+ */
 export interface SongStorage {
   getAll(): Promise<MarketSong[]>;
   put(song: MarketSong): Promise<void>;
   delete(id: string): Promise<void>;
+  /** Optional: list without frames (a network store should not download every take to list them). */
+  listMeta?(): Promise<MarketSongMeta[]>;
+  /** Optional: fetch one song without listing all of them. */
+  get?(id: string): Promise<MarketSong | undefined>;
 }
 
 /** Sound-only preview of a song's first PREVIEW_MS. Never touches the stage or the robot. */
