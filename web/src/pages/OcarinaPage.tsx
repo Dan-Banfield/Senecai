@@ -1,20 +1,27 @@
 // The ocarina page: two robot hands hold a 12-hole Italian alto (ten holes,
 // subholes omitted) with fixed wrists; your calibrated finger flexion covers
-// the holes. Free play, lessons, and session-only takes with replay.
+// the holes. Free play, lessons, session-only takes with replay, and a song
+// market for publishing takes and replaying other players' songs.
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useOcarinaCamera } from '../crafts/ocarina/cameraStore';
 import { cameraKeyStep, VIEW_LABEL, VIEW_ORDER } from '../crafts/ocarina/cameraViews';
 import { fingeringFor, midiToName } from '../crafts/ocarina/fingering';
-import { scheduleSong, type NoteResult } from '../crafts/ocarina/lesson';
+import { market } from '../crafts/ocarina/market';
+import { library } from '../crafts/ocarina/market/library';
+import { noteIndexAt, takeNoteEvents } from '../crafts/ocarina/market/lessonSong';
+import { MarketModal } from '../crafts/ocarina/market/MarketModal';
+import { previewPlayer } from '../crafts/ocarina/market/preview';
+import { ARTIST_MAX, TITLE_MAX } from '../crafts/ocarina/market/types';
 import { OcarinaStage } from '../crafts/ocarina/OcarinaStage';
 import { OcarinaSession, useOcarinaUi } from '../crafts/ocarina/session';
-import { useInputDemand } from '../input/pipeline';
+import { LIB_PREFIX } from '../crafts/ocarina/lessonPrefs';
+import { PlaybackBar, WATCH_PREFIX } from '../crafts/ocarina/PlaybackBar';
+import { useSelectedSong } from '../crafts/ocarina/useSelectedSong';
 import { SONGS } from '../crafts/ocarina/songs';
 import { HOLES, type HoleStates } from '../crafts/ocarina/types';
-import { calibrationKey, usePipeline } from '../input/pipeline';
+import { useInputDemand, usePipeline } from '../input/pipeline';
 import { Icon } from '../ui/icons';
-import { CalibrationWizard } from '../ui/InputPanel';
 import { WebcamPreview } from '../ui/WebcamPreview';
 
 /** Diagram order, as seen from the player: left hand on the left, index fingers in the middle. */
@@ -48,46 +55,6 @@ export function FingeringDiagram({ holes, target }: { holes: HoleStates; target?
   );
 }
 
-const RESULT_CLASS: Record<NoteResult, string> = { pending: '', hit: 'hit', miss: 'miss', rest: 'rest' };
-const stars = (n: number) => '★'.repeat(n) + '☆'.repeat(3 - n);
-
-function InputCard({ onCalibrate }: { onCalibrate: () => void }) {
-  const kind = usePipeline((s) => s.kind);
-  const status = usePipeline((s) => s.status);
-  const present = usePipeline((s) => s.present);
-  const calibrated = usePipeline((s) => !!(s.kind && s.calibrations[calibrationKey(s.kind, 'ocarina')]));
-  if (!kind) {
-    return (
-      <div className="card" style={{ borderColor: 'var(--forest)' }}>
-        <h3>Connect your hands</h3>
-        <p>
-          Best with <b>Rokoko Smartgloves</b>: each finger's bend covers one hole. The webcam glove emulator and the keyboard also work for testing.
-        </p>
-        <div className="row" style={{ marginTop: 12 }}>
-          <button className="btn primary small" onClick={() => usePipeline.getState().setPanelOpen(true)}>
-            Choose input
-          </button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="card">
-      <h3>{calibrated ? 'Calibrated for the ocarina' : 'Calibrate for the ocarina'}</h3>
-      <p>
-        Open your hand fully, then make a fist. A finger covers its hole past about half its range. The wrists are held still; only your fingers count.
-      </p>
-      {!present.left && !present.right && (
-        <p style={{ marginTop: 8, color: 'var(--warn)' }}>No hand detected yet. {status.message}</p>
-      )}
-      <div className="row" style={{ marginTop: 12 }}>
-        <button className={`btn small ${calibrated ? '' : 'primary'}`} onClick={onCalibrate}>
-          {calibrated ? 'Recalibrate' : 'Calibrate'}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 function FreePlay() {
   const noteName = useOcarinaUi((s) => s.noteName);
@@ -103,19 +70,44 @@ function FreePlay() {
 }
 
 function LessonPanel({ session }: { session: OcarinaSession }) {
-  const lesson = useOcarinaUi((s) => s.lesson);
   const holes = useOcarinaUi((s) => s.holes);
-  const noteName = useOcarinaUi((s) => s.noteName);
   const replaying = useOcarinaUi((s) => s.replaying);
-  const [songId, setSongId] = useState(SONGS[0].id);
-  const [wait, setWait] = useState(false);
-  const song = SONGS.find((s) => s.id === (lesson?.songId ?? songId)) ?? SONGS[0];
-  const events = useMemo(() => scheduleSong(song).events, [song]);
-  const running = !!lesson && lesson.state !== 'done';
-  const target = lesson && lesson.state !== 'done' ? (events[lesson.current]?.midi ?? null) : null;
-  const targetHoles = target !== null ? fingeringFor(target) : undefined;
-  const from = lesson ? Math.max(0, Math.min(lesson.current - 1, events.length - 8)) : 0;
+  const sel = useSelectedSong();
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  const [time, setTime] = useState(0);
+
+  const song = sel.song;
+  const take = sel.take;
+  // Note timings straight from the take the playback bar replays, so the card follows it exactly.
+  const events = useMemo(() => (take ? takeNoteEvents(take) : []), [take]);
+  const following = replaying === WATCH_PREFIX + sel.pick;
+  const playable = !!song && song.notes.length > 0;
+
+  // Follow the replay position (pause, seek and speed included) ~20x per second.
+  useEffect(() => {
+    if (!following) {
+      setTime(0);
+      return;
+    }
+    setTime(session.replayTime);
+    const id = window.setInterval(() => setTime(session.replayTime), 50);
+    return () => window.clearInterval(id);
+  }, [following, session]);
+
+  const current = following ? noteIndexAt(events, time) : 0;
+  const ev = events[current];
+  const next = events[current + 1];
+  const targetHoles = ev?.midi != null ? fingeringFor(ev.midi) : undefined;
+  const from = Math.max(0, Math.min(current - 1, events.length - 8));
   const lane = events.slice(from, from + 8);
+  const progress = following && take ? Math.min(1, time / take.durationMs) : 0;
+  const noteLabel = (midi: number | null) => (midi === null ? 'rest' : midiToName(midi));
+
+  const choose = (value: string) => {
+    if (following) session.stopReplay();
+    setRemoveError(null);
+    sel.setPick(value);
+  };
 
   return (
     <>
@@ -123,64 +115,78 @@ function LessonPanel({ session }: { session: OcarinaSession }) {
         <h3>Lesson</h3>
         <div className="field" style={{ marginTop: 8 }}>
           Song
-          <select value={song.id} disabled={running} onChange={(e) => {
-              setSongId(e.target.value);
-              if (lesson) session.stopLesson();
-            }}>
-            {SONGS.map((s) => (
-              <option key={s.id} value={s.id}>
-                {s.title} · {s.bpm} bpm
-              </option>
-            ))}
+          <select value={sel.pick} onChange={(e) => choose(e.target.value)}>
+            <optgroup label="Built-in">
+              {SONGS.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.title} · {s.bpm} bpm
+                </option>
+              ))}
+            </optgroup>
+            {sel.downloaded.length > 0 && (
+              <optgroup label="Downloaded">
+                {sel.downloaded.map((s) => (
+                  <option key={s.id} value={LIB_PREFIX + s.id}>
+                    {s.title} · {s.artist}
+                  </option>
+                ))}
+              </optgroup>
+            )}
           </select>
         </div>
-        <label className="toggle" style={{ marginTop: 10 }}>
-          <input type="checkbox" checked={lesson?.wait ?? wait} disabled={running} onChange={(e) => {
-              setWait(e.target.checked);
-              if (lesson) session.stopLesson();
-            }} />
-          Wait for me (the melody moves on once you hold the right note)
-        </label>
-        <div className="row" style={{ marginTop: 12 }}>
-          {running ? (
-            <button className="btn small" onClick={() => session.stopLesson()}>
-              Stop
+        {sel.libId && (
+          <div className="oc-lib-row">
+            <span className="grow">
+              {removeError ?? sel.error ?? (sel.artist ? `Recorded by ${sel.artist}` : 'Loading…')}
+              {song && !playable && ' · no notes to practise'}
+            </span>
+            <button
+              type="button"
+              className="oc-icon-btn ghost"
+             
+              aria-label="Remove from lesson library"
+              title="Remove from lesson library"
+              onClick={() => {
+                const id = sel.libId!;
+                if (replaying === WATCH_PREFIX + sel.pick) session.stopReplay();
+                void library.remove(id).catch((e: unknown) => setRemoveError(e instanceof Error ? e.message : 'Could not remove this song.'));
+              }}
+            >
+              <Icon name="trash" size={16} />
             </button>
-          ) : (
-            <button className="btn primary small" disabled={!!replaying} onClick={() => session.startLesson(songId, wait)}>
-              {lesson ? 'Play again' : 'Start'}
-            </button>
-          )}
-        </div>
+          </div>
+        )}
+        {!sel.libId && sel.downloaded.length === 0 && (
+          <p style={{ marginTop: 8, fontSize: 13 }}>Download songs from the Song market to practise them here.</p>
+        )}
       </div>
 
-      {lesson && (
+      {events.length > 0 && (
         <div className="card">
-          {lesson.state === 'countin' && <h3>Get ready… {lesson.countIn}</h3>}
-          {lesson.state === 'playing' && (
+          {following ? (
             <h3>
-              Play {target === null ? 'nothing (rest)' : midiToName(target)}
-              <span style={{ color: 'var(--muted)', fontSize: 14, marginLeft: 10 }}>you: {noteName ?? '—'}</span>
+              Now {ev ? noteLabel(ev.midi) : '—'}
+              {next && <span style={{ color: 'var(--muted)', fontSize: 14, marginLeft: 10 }}>next: {noteLabel(next.midi)}</span>}
+            </h3>
+          ) : (
+            <h3>
+              Starts on {ev ? noteLabel(ev.midi) : '—'}
+              <span style={{ color: 'var(--muted)', fontSize: 14, marginLeft: 10 }}>press play below to follow along</span>
             </h3>
           )}
-          {lesson.state === 'done' &&
-            (lesson.wait ? (
-              <h3>Practice complete</h3>
-            ) : (
-              <h3>
-                {Math.round(lesson.hitPercent)}% <span className="oc-stars">{stars(lesson.stars)}</span>
-              </h3>
-            ))}
           <div className="oc-lane">
-            {lane.map((ev) => (
-              <span key={ev.index} className={`oc-lane-note ${RESULT_CLASS[lesson.results[ev.index]]}${ev.index === lesson.current && lesson.state !== 'done' ? ' on' : ''}`}>
-                {ev.midi === null ? '·' : midiToName(ev.midi)}
+            {lane.map((e) => (
+              <span
+                key={e.index}
+                className={`oc-lane-note${e.midi === null ? ' rest' : ''}${e.index < current ? ' past' : ''}${e.index === current ? ' on' : ''}`}
+              >
+                {e.midi === null ? '·' : midiToName(e.midi)}
               </span>
             ))}
           </div>
-          {targetHoles && <FingeringDiagram holes={holes} target={targetHoles} />}
+          {targetHoles && <FingeringDiagram holes={following ? holes : targetHoles} target={targetHoles} />}
           <div className="meter" style={{ marginTop: 10 }}>
-            <div style={{ width: `${(Math.min(lesson.current, events.length) / events.length) * 100}%` }} />
+            <div style={{ width: `${progress * 100}%` }} />
           </div>
         </div>
       )}
@@ -195,6 +201,79 @@ const fmtTime = (ms: number) => {
   return `${m}:${sec}`;
 };
 
+const ARTIST_KEY = 'senecai.ocarina.artist';
+
+const loadArtist = () => {
+  try {
+    return localStorage.getItem(ARTIST_KEY) ?? '';
+  } catch {
+    return '';
+  }
+};
+
+const saveArtist = (name: string) => {
+  try {
+    localStorage.setItem(ARTIST_KEY, name);
+  } catch {
+    // Remembering the name is a convenience only.
+  }
+};
+
+/** Inline form under a take: title + artist, then publish the take to the song market. */
+function PublishForm({ session, takeId, takeName, onDone, onCancel }: {
+  session: OcarinaSession;
+  takeId: string;
+  takeName: string;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [title, setTitle] = useState(() => takeName.slice(0, TITLE_MAX));
+  const [artist, setArtist] = useState(loadArtist);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const t = title.trim();
+  const a = artist.trim();
+  const valid = t.length > 0 && t.length <= TITLE_MAX && a.length > 0 && a.length <= ARTIST_MAX;
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const take = session.getTakes().find((x) => x.id === takeId);
+    if (!valid || saving || !take) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await market.publish(take, { title: t, artist: a });
+      saveArtist(a);
+      onDone();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not publish this take.');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="oc-publish" onSubmit={submit}>
+      <label className="field">
+        <span>Title</span>
+        <input type="text" value={title} maxLength={TITLE_MAX} onChange={(e) => setTitle(e.target.value)} autoFocus />
+      </label>
+      <label className="field">
+        <span>Your name</span>
+        <input type="text" value={artist} maxLength={ARTIST_MAX} placeholder="Shown on the market" onChange={(e) => setArtist(e.target.value)} />
+      </label>
+      {error && <div className="oc-publish-error" role="alert">{error}</div>}
+      <div className="row">
+        <button type="submit" className="btn small primary" disabled={!valid || saving}>
+          {saving ? 'Publishing…' : 'Publish'}
+        </button>
+        <button type="button" className="btn small ghost" disabled={saving} onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** Voice-recorder style strip: record button + timer, sound and robot toggles, then the take list. */
 function Recorder({ session }: { session: OcarinaSession }) {
   const recording = useOcarinaUi((s) => s.recording);
@@ -204,6 +283,8 @@ function Recorder({ session }: { session: OcarinaSession }) {
   const mirror = usePipeline((s) => s.settings.mirrorRobot);
   const [startedAt, setStartedAt] = useState<number | null>(null);
   const [now, setNow] = useState(() => performance.now());
+  const [publishing, setPublishing] = useState<string | null>(null);
+  const [published, setPublished] = useState<ReadonlySet<string>>(() => new Set());
 
   useEffect(() => {
     if (!recording) {
@@ -228,7 +309,14 @@ function Recorder({ session }: { session: OcarinaSession }) {
           disabled={!!replaying}
           aria-label={recording ? 'Stop recording' : 'Record a take'}
           title={recording ? 'Stop recording' : 'Record a take (fingers, notes and robot commands; kept until you leave)'}
-          onClick={() => (recording ? session.stopRecording() : session.startRecording())}
+          onClick={() => {
+            if (recording) {
+              session.stopRecording();
+            } else {
+              previewPlayer.stop();
+              session.startRecording();
+            }
+          }}
         >
           <span />
         </button>
@@ -266,21 +354,60 @@ function Recorder({ session }: { session: OcarinaSession }) {
                   disabled={!playing && recording}
                   aria-label={playing ? `Stop ${t.name}` : `Replay ${t.name}`}
                   title={playing ? 'Stop' : 'Replay'}
-                  onClick={() => (playing ? session.stopReplay() : session.replay(t.id))}
+                  onClick={() => {
+                    if (playing) {
+                      session.stopReplay();
+                    } else {
+                      previewPlayer.stop();
+                      session.replay(t.id);
+                    }
+                  }}
                 >
                   <Icon name={playing ? 'stop' : 'play'} size={16} />
                 </button>
                 <span className="oc-take-name">{t.name}</span>
                 <span className="mono">{fmtTime(t.durationMs)}</span>
+                {published.has(t.id) ? (
+                  <span className="oc-take-published" title="Published to the song market" aria-label="Published">
+                    <Icon name="check" size={16} />
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className={`oc-icon-btn ghost${publishing === t.id ? ' on' : ''}`}
+                    disabled={playing}
+                    aria-label={`Publish ${t.name} to the song market`}
+                    aria-expanded={publishing === t.id}
+                    title="Publish to the song market"
+                    onClick={() => setPublishing((cur) => (cur === t.id ? null : t.id))}
+                  >
+                    <Icon name="upload" size={16} />
+                  </button>
+                )}
                 <button
                   type="button"
                   className="oc-icon-btn ghost"
                   aria-label={`Delete ${t.name}`}
                   title="Delete"
-                  onClick={() => session.deleteTake(t.id)}
+                  onClick={() => {
+                    if (publishing === t.id) setPublishing(null);
+                    session.deleteTake(t.id);
+                  }}
                 >
                   <Icon name="trash" size={16} />
                 </button>
+                {publishing === t.id && (
+                  <PublishForm
+                    session={session}
+                    takeId={t.id}
+                    takeName={t.name}
+                    onCancel={() => setPublishing(null)}
+                    onDone={() => {
+                      setPublishing((cur) => (cur === t.id ? null : cur));
+                      setPublished((prev) => new Set(prev).add(t.id));
+                    }}
+                  />
+                )}
               </li>
             );
           })}
@@ -296,7 +423,10 @@ export default function OcarinaPage() {
   const session = useMemo(() => new OcarinaSession(), []);
   useEffect(() => {
     session.activate();
-    return () => session.dispose();
+    return () => {
+      previewPlayer.dispose();
+      session.dispose();
+    };
   }, [session]);
 
   const mode = useOcarinaUi((s) => s.mode);
@@ -306,8 +436,8 @@ export default function OcarinaPage() {
   const lesson = useOcarinaUi((s) => s.lesson);
   const kind = usePipeline((s) => s.kind);
   const status = usePipeline((s) => s.status);
-  const [calibrating, setCalibrating] = useState(false);
   const [hudOpen, setHudOpen] = useState(true);
+  const [marketOpen, setMarketOpen] = useState(false);
   const view = useOcarinaCamera((s) => s.view);
   const setView = useOcarinaCamera((s) => s.setView);
 
@@ -349,8 +479,6 @@ export default function OcarinaPage() {
 
         {hudOpen && (
           <div className="oc-hud-body">
-            <InputCard onCalibrate={() => setCalibrating(true)} />
-
             <div className="tabs">
               <button className={mode === 'free' ? 'on' : ''} onClick={() => session.setMode('free')}>
                 Free play
@@ -368,12 +496,21 @@ export default function OcarinaPage() {
       </aside>
 
       <div className="oc-top-actions">
+        <button
+          type="button"
+          className="oc-market-btn"
+          aria-expanded={marketOpen}
+          aria-controls="oc-market"
+          onClick={() => setMarketOpen((v) => !v)}
+        >
+          <Icon name="market" />
+          Song market
+        </button>
         {!audioReady && (
           <button className="btn primary oc-sound" onClick={() => session.enableAudio()}>
             Enable sound
           </button>
         )}
-        {replaying && <div className="oc-stage-tag">Replay</div>}
         <WebcamPreview />
       </div>
 
@@ -397,7 +534,10 @@ export default function OcarinaPage() {
         )}
       </div>
 
-      {calibrating && <CalibrationWizard onClose={() => setCalibrating(false)} />}
+      <PlaybackBar session={session} />
+
+      <MarketModal session={session} open={marketOpen} onClose={() => setMarketOpen(false)} />
+
     </div>
   );
 }

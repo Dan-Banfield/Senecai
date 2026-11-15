@@ -20,7 +20,7 @@ import { HoleTracker, midiToName, pitchOf } from './fingering';
 import { Lesson, type NoteResult } from './lesson';
 import { TakePlayer, TakeRecorder } from './recording';
 import { SONGS } from './songs';
-import { HOLES, type HoleStates, type OcarinaSynth, type OcarinaView, type Take, type TakeFrame } from './types';
+import { HOLES, type HoleStates, type OcarinaSynth, type OcarinaView, type Song, type Take, type TakeFrame } from './types';
 
 export type OcarinaMode = 'free' | 'lesson';
 
@@ -53,8 +53,14 @@ export interface OcarinaUi {
   lesson: OcarinaLessonUi | null;
   recording: boolean;
   takes: TakeMeta[];
-  /** Id of the take being replayed, if any. */
+  /** Id of the take (or market song) being replayed, if any. */
   replaying: string | null;
+  /** Name of the take being replayed (shown on the stage), if any. */
+  replayingName: string | null;
+  /** Length of the replaying take in take time (ms), 0 when nothing replays. */
+  replayDurationMs: number;
+  /** Replay is frozen on its current frame (hands hold, sound off). */
+  replayPaused: boolean;
   muted: boolean;
   /** Whether the browser has let audio start (it needs a click or key press first). */
   audioReady: boolean;
@@ -70,6 +76,9 @@ const initialUi = (): OcarinaUi => ({
   recording: false,
   takes: [],
   replaying: null,
+  replayingName: null,
+  replayDurationMs: 0,
+  replayPaused: false,
   muted: false,
   audioReady: false,
 });
@@ -91,6 +100,11 @@ export class OcarinaSession {
   private synthDisposed = false;
   private muted = false;
   private player: TakePlayer | null = null;
+  /** Id shown as useOcarinaUi.replaying (a take id or a market song id). */
+  private replayId: string | null = null;
+  /** Replay speed multiplier (take ms per real ms). */
+  private rate = 1;
+  private paused = false;
   /** The take frame currently shown during replay (what the robot is sent). */
   private replayFrame: TakeFrame | undefined;
   private lesson: Lesson | null = null;
@@ -171,7 +185,7 @@ export class OcarinaSession {
     const view = this.view;
 
     if (this.player) {
-      const frame = this.player.tick(dt);
+      const frame = this.paused ? this.player.seek(this.player.time) : this.player.tick(dt * this.rate);
       if (this.player.done) {
         this.endReplay();
       } else {
@@ -182,7 +196,7 @@ export class OcarinaSession {
           else delete view.dof[side];
         }
         view.holes = frame ? frame.holes : HOLES.map(() => false);
-        view.midi = frame ? frame.midi : null;
+        view.midi = frame && !this.paused ? frame.midi : null;
         this.synth.setNote(view.midi);
         this.publishFrame();
         return;
@@ -220,12 +234,17 @@ export class OcarinaSession {
     useOcarinaUi.setState({ mode, lesson: this.lessonUi() });
   }
 
-  startLesson(songId: string, wait: boolean): void {
+  /**
+   * Starts a lesson on a built-in song id or any Song (e.g. one derived from a
+   * downloaded market take). `speed` scales the tempo (count-in included).
+   */
+  startLesson(songOrId: string | Song, wait: boolean, speed = 1): void {
     if (this.player) return;
-    const song = SONGS.find((s) => s.id === songId);
-    if (!song) throw new Error(`Unknown song: ${songId}`);
+    const song = typeof songOrId === 'string' ? SONGS.find((s) => s.id === songOrId) : songOrId;
+    if (!song) throw new Error(`Unknown song: ${String(songOrId)}`);
+    if (!song.notes.length) throw new Error(`Song has no notes: ${song.id}`);
     this.mode = 'lesson';
-    this.lesson = new Lesson(song, { wait });
+    this.lesson = new Lesson(speed === 1 ? song : { ...song, bpm: song.bpm * speed }, { wait });
     useOcarinaUi.setState({ mode: 'lesson', lesson: this.lessonUi() });
   }
 
@@ -255,15 +274,48 @@ export class OcarinaSession {
     return take;
   }
 
+  /** Replays one of this session's takes. Refused while recording. */
   replay(takeId: string): void {
     const take = this.takes.find((t) => t.id === takeId);
-    if (!take) return;
-    if (this.recorder.recording) this.stopRecording();
+    if (take) this.replayTake(take, take.id);
+  }
+
+  /**
+   * Replays any take (e.g. a market song) through the same path as session takes;
+   * `id` is what useOcarinaUi.replaying shows. Refused while recording; ends any
+   * replay already running.
+   */
+  replayTake(take: Take, id: string): void {
+    if (this.recorder.recording) return;
+    this.endReplay();
     if (this.lesson) this.stopLesson();
     this.player = new TakePlayer(take);
+    this.replayId = id;
+    this.paused = false;
     this.replayFrame = undefined;
     setRobotOverride(() => this.replayFrame?.inspire);
-    useOcarinaUi.setState({ replaying: take.id });
+    useOcarinaUi.setState({ replaying: id, replayingName: take.name, replayDurationMs: take.durationMs, replayPaused: false });
+  }
+
+  /** Position of the running replay in take time (ms), 0 when idle. */
+  get replayTime(): number {
+    return this.player?.time ?? 0;
+  }
+
+  /** Replay speed for every replay (takes, market songs, demos); clamped to 0.25..2. */
+  setPlaybackRate(rate: number): void {
+    this.rate = Number.isFinite(rate) ? Math.min(2, Math.max(0.25, rate)) : 1;
+  }
+
+  setReplayPaused(paused: boolean): void {
+    if (!this.player || this.paused === paused) return;
+    this.paused = paused;
+    useOcarinaUi.setState({ replayPaused: paused });
+  }
+
+  /** Jumps the running replay to `ms` of take time. */
+  seekReplay(ms: number): void {
+    this.player?.seek(ms);
   }
 
   stopReplay(): void {
@@ -271,7 +323,7 @@ export class OcarinaSession {
   }
 
   deleteTake(id: string): void {
-    if (this.player?.take.id === id) this.endReplay();
+    if (this.replayId === id) this.endReplay();
     this.takes = this.takes.filter((t) => t.id !== id);
     useOcarinaUi.setState({ takes: this.takeMetas() });
   }
@@ -289,11 +341,13 @@ export class OcarinaSession {
   private endReplay(): void {
     if (!this.player) return;
     this.player = null;
+    this.replayId = null;
+    this.paused = false;
     this.replayFrame = undefined;
     setRobotOverride(null);
     this.synth.setNote(null);
     this.view.midi = null;
-    useOcarinaUi.setState({ replaying: null });
+    useOcarinaUi.setState({ replaying: null, replayingName: null, replayDurationMs: 0, replayPaused: false });
   }
 
   private takeMetas(): TakeMeta[] {
@@ -352,7 +406,10 @@ export class OcarinaSession {
       lesson: this.lessonUi(),
       recording: this.recorder.recording,
       takes: this.takeMetas(),
-      replaying: this.player?.take.id ?? null,
+      replaying: this.replayId,
+      replayingName: this.player?.take.name ?? null,
+      replayDurationMs: this.player?.take.durationMs ?? 0,
+      replayPaused: this.paused,
       muted: this.muted,
     });
   }

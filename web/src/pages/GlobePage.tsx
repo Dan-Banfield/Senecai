@@ -26,7 +26,8 @@ const CARD_W = 300;
 const CLUSTER_ABOVE = 1.3;
 const UNCLUSTER_BELOW = 1.1;
 const CLUSTER_MIN_PINS = 3;
-const CRAFT_COUNTRIES = new Set(CRAFTS.map((c) => c.country));
+/** Only countries with a playable craft stand out in green; 'coming soon' ones keep their atlas colour. */
+const CRAFT_COUNTRIES = new Set(CRAFTS.filter((c) => c.status === 'playable').map((c) => c.country));
 /** Map labels and pins sit just above the country caps. */
 const HTML_ALT = 0.008;
 

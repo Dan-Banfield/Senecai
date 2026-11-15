@@ -13,6 +13,12 @@ const PATHS = {
     </>
   ),
   play: <path d="M8 5.5v13l10.5-6.5z" fill="currentColor" />,
+  pause: (
+    <>
+      <rect x="7" y="6" width="3.5" height="12" rx="1" fill="currentColor" stroke="none" />
+      <rect x="13.5" y="6" width="3.5" height="12" rx="1" fill="currentColor" stroke="none" />
+    </>
+  ),
   stop: <rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" />,
   trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 002 2h6a2 2 0 002-2l1-12M9 7V4h6v3" />,
   volume: <path d="M4 9v6h4l5 4V5L8 9H4zM16.5 8.5a5 5 0 010 7M19 6a8.5 8.5 0 010 12" />,
