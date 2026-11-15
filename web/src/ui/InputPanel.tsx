@@ -1,15 +1,10 @@
 import { useEffect, useState } from 'react';
 import { calibrationKey, useInputDemand, usePipeline } from '../input/pipeline';
-import { KEYBOARD_HELP } from '../input/keyboardSource';
 import type { Rotation } from '../input/gloveTracker';
-import { SOURCE_LABELS, type SourceKind } from '../input/types';
-
-const SOURCES: { kind: SourceKind; icon: string; desc: string }[] = [
-  { kind: 'webcam', icon: '📷', desc: 'Emulates the gloves with webcam hand tracking. Same Rokoko JSON v3 frames, no hardware.' },
-  { kind: 'fused', icon: '🧤📷', desc: 'Best with Smartgloves: the gloves drive your fingers and wrist, a camera looking down at the table tracks where the gloves are. Needs the bridge (npm run bridge:sdk) and an overhead camera.' },
-  { kind: 'gloves', icon: '🧤', desc: 'Rokoko Device SDK (Linux, macOS, Windows) or Rokoko Studio → bridge (npm run bridge) → here. Without a Coil Pro the gloves can\'t track where your hands are, so you aim by tilting your wrist.' },
-  { kind: 'keyboard', icon: '⌨️', desc: KEYBOARD_HELP },
-];
+import { SOURCE_LABELS } from '../input/types';
+import { Icon } from './icons';
+import { SOURCE_INFO, SOURCE_ORDER, sourceFields } from './inputFields';
+import { WebcamPreview } from './WebcamPreview';
 
 export function SourcePill() {
   const { kind, status, present, setPanelOpen } = usePipeline();
@@ -90,111 +85,169 @@ function useCameras(enabled: boolean, statusState: string) {
   return cameras;
 }
 
+
+/** Render `code` spans in a setup note. */
+function SetupNote({ text }: { text: string }) {
+  return <p className="inp-note">{text.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}</p>;
+}
+
+/** The keyboard map as key chips: "A S D F G = thumb…little · Space = fist" → rows of <kbd> + meaning. */
+function KeyMap({ text }: { text: string }) {
+  return (
+    <dl className="inp-keys">
+      {text.split(' · ').map((entry) => {
+        const [keys, meaning] = entry.split(' = ');
+        return (
+          <div key={entry}>
+            <dt>{keys.split(' ').map((k) => <kbd key={k}>{k}</kbd>)}</dt>
+            <dd>{meaning}</dd>
+          </div>
+        );
+      })}
+    </dl>
+  );
+}
+
 export function InputPanel() {
-  const { panelOpen, setPanelOpen, kind, status, start, stop, settings, updateSettings, resetCalibration, calibrations, calibrationContext, fps } = usePipeline();
+  const { panelOpen, setPanelOpen, kind, status, present, start, stop, settings, updateSettings, resetCalibration, calibrations, calibrationContext, fps } = usePipeline();
   const calibrated = kind ? !!calibrations[calibrationKey(kind, calibrationContext)] : false;
   const [calibrating, setCalibrating] = useState(false);
   const [bridgeUrl, setBridgeUrl] = useState(settings.bridgeUrl);
-  const cameras = useCameras(panelOpen, status.state);
+  const fields = sourceFields(kind);
+  const cameras = useCameras(panelOpen && fields.includes('camera'), status.state);
   // The drawer shows the live input (status, fps, camera preview), so the source runs while it is open.
   useInputDemand(panelOpen);
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setPanelOpen(false);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panelOpen, setPanelOpen]);
   if (!panelOpen) return calibrating ? <CalibrationWizard onClose={() => setCalibrating(false)} /> : null;
+
+  const hands = [present.left && 'L', present.right && 'R'].filter(Boolean).join(' + ');
+  // The keyboard source reports its whole key map as its status; that lives in the fold instead.
+  const statusText = kind === 'keyboard' && status.state === 'live' ? 'Live' : status.message;
 
   return (
     <>
       <div className="drawer-backdrop" onClick={() => setPanelOpen(false)} />
-      <aside className="drawer">
-        <div className="row" style={{ justifyContent: 'space-between' }}>
-          <h2>Hand input</h2>
-          <button className="btn small ghost" onClick={() => setPanelOpen(false)}>Close</button>
-        </div>
-        <div style={{ display: 'grid', gap: 8 }}>
-          {SOURCES.map((s) => (
-            <button key={s.kind} className={`source-option ${kind === s.kind ? 'on' : ''}`} onClick={() => {
-                if (kind === s.kind) {
-                  stop();
-                  usePipeline.setState({ lastKind: null });
-                } else void start(s.kind);
-              }}>
-              <span className="ico">{s.icon}</span>
-              <span>
-                <b>{SOURCE_LABELS[s.kind]}</b>
-                <span>{s.desc}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-        <div className="status-line">
-          <span className={`dot ${status.state}`} /> {status.message} {kind && `· ${fps} fps`}
+      <aside className="drawer" aria-label="Hand input">
+        <header className="inp-head">
+          <div>
+            <h2>Hand input</h2>
+            <p className="inp-eyebrow">How the robot reads your hands</p>
+          </div>
+          <button className="oc-icon-btn ghost" onClick={() => setPanelOpen(false)} aria-label="Close" title="Close (Esc)">
+            <Icon name="close" />
+          </button>
+        </header>
+
+        <div className="inp-sources" role="radiogroup" aria-label="Input source">
+          {SOURCE_ORDER.map((k) => {
+            const info = SOURCE_INFO[k];
+            const on = kind === k;
+            return (
+              <button key={k} role="radio" aria-checked={on} className={`inp-source${on ? ' on' : ''}`} onClick={() => !on && void start(k)}>
+                <span className="inp-source-ico"><Icon name={info.icon} size={22} /></span>
+                <span className="inp-source-text">
+                  <b>{SOURCE_LABELS[k]}</b>
+                  <span>{info.blurb}</span>
+                </span>
+                <span className="inp-radio" aria-hidden="true" />
+              </button>
+            );
+          })}
         </div>
 
         {kind && (
-          <div className="card">
-            <h3>Calibration</h3>
-            <p>
-              {calibrated ? 'Calibrated for this input.' : 'Using defaults (auto-range is on). A 6-second calibration makes it feel much better.'}
-            </p>
-            <div className="row" style={{ marginTop: 12 }}>
-              <button
-                className="btn primary small"
-                onClick={() => {
-                  setCalibrating(true);
-                  setPanelOpen(false);
-                }}
-              >
-                Calibrate
-              </button>
-              {calibrated && (
-                <button className="btn small" onClick={resetCalibration}>
-                  Reset
-                </button>
-              )}
+          <section className="inp-section">
+            <div className="inp-status">
+              <span className={`dot ${status.state}`} />
+              <span className="inp-status-text">{statusText}</span>
+              <span className="inp-status-meta mono">
+                {fps} fps{hands && ` · ${hands}`}
+              </span>
+              <button className="inp-link" onClick={() => { stop(); usePipeline.setState({ lastKind: null }); }}>Stop</button>
             </div>
-          </div>
+            {status.state !== 'error' && <WebcamPreview />}
+            <div className="inp-calib">
+              <span>
+                <b>Calibration</b>
+                {calibrated ? 'Fitted to your hand.' : 'Using defaults. Six seconds makes it feel much better.'}
+              </span>
+              <span className="row">
+                {calibrated && <button className="inp-link" onClick={resetCalibration}>Reset</button>}
+                <button className="btn primary small" onClick={() => { setCalibrating(true); setPanelOpen(false); }}>
+                  {calibrated ? 'Recalibrate' : 'Calibrate'}
+                </button>
+              </span>
+            </div>
+          </section>
         )}
 
-        <div className="card" style={{ display: 'grid', gap: 12 }}>
+        <section className="inp-section inp-settings">
           <h3>Settings</h3>
-          <label className="field">
-            Dominant hand (drives the knife / plucks)
-            <select value={settings.dominant} onChange={(e) => updateSettings({ dominant: e.target.value as 'left' | 'right' })}>
-              <option value="right">Right</option>
-              <option value="left">Left</option>
-            </select>
-          </label>
-          <label className="field">
-            Camera (hand tracking)
-            <select value={cameras.some((c) => c.deviceId === settings.cameraId) ? settings.cameraId : ''} onChange={(e) => updateSettings({ cameraId: e.target.value })}>
-              <option value="">Default camera</option>
-              {cameras.map((c, i) => (
-                <option key={c.deviceId} value={c.deviceId}>
-                  {c.label || `Camera ${i + 1}`}
-                </option>
+          <div className="inp-field">
+            <span>Dominant hand</span>
+            <div className="inp-seg" role="radiogroup" aria-label="Dominant hand">
+              {(['left', 'right'] as const).map((side) => (
+                <button key={side} role="radio" aria-checked={settings.dominant === side} className={settings.dominant === side ? 'on' : ''} onClick={() => updateSettings({ dominant: side })}>
+                  {side === 'left' ? 'Left' : 'Right'}
+                </button>
               ))}
-            </select>
-          </label>
-          {kind === 'fused' && (
-            <label className="field">
-              Turn the overhead picture so you sit at its bottom
+            </div>
+          </div>
+          {fields.includes('camera') && (
+            <label className="inp-field">
+              <span>{kind === 'fused' ? 'Overhead camera' : 'Camera'}</span>
+              <select value={cameras.some((c) => c.deviceId === settings.cameraId) ? settings.cameraId : ''} onChange={(e) => updateSettings({ cameraId: e.target.value })}>
+                <option value="">Default camera</option>
+                {cameras.map((c, i) => (
+                  <option key={c.deviceId} value={c.deviceId}>
+                    {c.label || `Camera ${i + 1}`}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+          {fields.includes('rotation') && (
+            <label className="inp-field">
+              <span>Picture turned</span>
               <select value={settings.cameraRotation ?? 0} onChange={(e) => updateSettings({ cameraRotation: Number(e.target.value) as Rotation })}>
                 <option value={0}>Not turned</option>
                 <option value={90}>90° clockwise</option>
-                <option value={180}>Upside down (180°)</option>
+                <option value={180}>Upside down</option>
                 <option value={270}>90° anticlockwise</option>
               </select>
             </label>
           )}
-          <label className="toggle">
-            <input type="checkbox" checked={settings.swapHands} onChange={(e) => updateSettings({ swapHands: e.target.checked })} /> Swap left/right (webcam)
-          </label>
-          <label className="field">
-            Bridge URL (for gloves)
-            <input type="text" value={bridgeUrl} onChange={(e) => setBridgeUrl(e.target.value)} onBlur={() => bridgeUrl !== settings.bridgeUrl && updateSettings({ bridgeUrl })} />
-          </label>
-          <label className="toggle">
-            <input type="checkbox" checked={settings.mirrorRobot} onChange={(e) => updateSettings({ mirrorRobot: e.target.checked })} /> Mirror to physical robot hand via bridge
-          </label>
-        </div>
+          {fields.includes('swapHands') && (
+            <label className="inp-check">
+              <input type="checkbox" checked={settings.swapHands} onChange={(e) => updateSettings({ swapHands: e.target.checked })} />
+              <span>Swap left and right</span>
+            </label>
+          )}
+        </section>
+
+        <details className="inp-fold">
+          <summary>
+            <Icon name="chevron" size={14} /> Setup &amp; advanced
+          </summary>
+          <div className="inp-fold-body">
+            {kind === 'keyboard' ? <KeyMap text={SOURCE_INFO.keyboard.setup} /> : kind && <SetupNote text={SOURCE_INFO[kind].setup} />}
+            {fields.includes('bridgeUrl') && (
+              <label className="inp-field">
+                <span>Bridge URL</span>
+                <input type="text" spellCheck={false} value={bridgeUrl} onChange={(e) => setBridgeUrl(e.target.value)} onBlur={() => bridgeUrl !== settings.bridgeUrl && updateSettings({ bridgeUrl })} />
+              </label>
+            )}
+            <label className="inp-check">
+              <input type="checkbox" checked={settings.mirrorRobot} onChange={(e) => updateSettings({ mirrorRobot: e.target.checked })} />
+              <span>Mirror to the physical robot hand (via the bridge)</span>
+            </label>
+          </div>
+        </details>
       </aside>
     </>
   );

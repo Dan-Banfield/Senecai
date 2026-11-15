@@ -30,29 +30,29 @@ const PATHS = {
       <circle cx="12" cy="4" r="1" />
     </>
   ),
-  download: <path d="M12 4v11M7.5 10.5L12 15l4.5-4.5M5 15v3a2 2 0 002 2h10a2 2 0 002-2v-3" />,
-  upload: <path d="M12 15V4M7.5 8.5L12 4l4.5 4.5M5 15v3a2 2 0 002 2h10a2 2 0 002-2v-3" />,
-  market: (
+  camera: (
     <>
-      <path d="M4 9.5L5.5 4h13L20 9.5M4 9.5h16M4 9.5a2.67 2.67 0 005.33 0 2.67 2.67 0 005.34 0 2.67 2.67 0 005.33 0" />
-      <path d="M5.5 12v8h13v-8M10 20v-4.5h4V20" />
+      <path d="M4 8.5A1.5 1.5 0 015.5 7h2.2l1.5-2h5.6l1.5 2h2.2A1.5 1.5 0 0120 8.5v9a1.5 1.5 0 01-1.5 1.5h-13A1.5 1.5 0 014 17.5z" />
+      <circle cx="12" cy="13" r="3.2" />
+    </>
+  ),
+  glove: <path d="M8 13V6.5a1.25 1.25 0 012.5 0V11M10.5 11V4.75a1.25 1.25 0 012.5 0V11M13 11V5.5a1.25 1.25 0 012.5 0V11.5M15.5 11.5V8a1.25 1.25 0 012.5 0v6.5a6 6 0 01-6 6h-.6a5 5 0 01-4-2l-2.9-3.9a1.3 1.3 0 012-1.6L8 14.5M7.5 20.5h7" />,
+  gloveCam: (
+    <>
+      <path d="M6 14V9.5a1 1 0 012 0V12M8 12V7.5a1 1 0 012 0V12M10 12V8.5a1 1 0 012 0v4a5 5 0 01-5 5h-.4a4 4 0 01-3.2-1.6L2 13.5a1 1 0 011.6-1.2L5 14" />
+      <rect x="14" y="3" width="8" height="6" rx="1.2" />
+      <circle cx="18" cy="6" r="1.3" />
+      <path d="M18 9v3" strokeDasharray="1.5 1.5" />
+    </>
+  ),
+  keys: (
+    <>
+      <rect x="3" y="6.5" width="18" height="11" rx="1.5" />
+      <path d="M6.5 10h0M9.5 10h0M12.5 10h0M15.5 10h0M17.5 10h0M7 14h10" />
     </>
   ),
   close: <path d="M6 6l12 12M18 6L6 18" />,
-  check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
-  search: (
-    <>
-      <circle cx="10.5" cy="10.5" r="6" />
-      <path d="M15 15l5 5" />
-    </>
-  ),
-  music: (
-    <>
-      <path d="M9 18V5.5l10-2V16" />
-      <circle cx="6.5" cy="18" r="2.5" />
-      <circle cx="16.5" cy="16" r="2.5" />
-    </>
-  ),
+  chevron: <path d="M9 6l6 6-6 6" />,
 } satisfies Record<string, ReactNode>;
 
 export type IconName = keyof typeof PATHS;
