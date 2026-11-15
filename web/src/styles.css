@@ -626,7 +626,6 @@ code, .mono { font-family: var(--mono); font-size: 0.85em; }
 }
 .oc-hud.collapsed .oc-hud-head { border-bottom: 0; padding: 10px 14px; }
 .oc-hud-head h1 { font-family: var(--display); font-size: 26px; line-height: 1.05; color: var(--birch); }
-.oc-hud-head .fi { font-family: var(--display); font-style: italic; font-size: 14px; color: var(--forest); }
 .oc-hud-tools { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 .oc-hud-toggle { color: var(--birch-dim); }
 .oc-hud-toggle:hover { color: var(--birch); }

@@ -572,7 +572,6 @@ export default function OcarinaPage() {
         <div className="oc-hud-head">
           <div>
             <h1>Ocarina</h1>
-            <div className="fi">ocarina · Budrio, Italy</div>
           </div>
           <div className="oc-hud-tools">
             {kind && (
