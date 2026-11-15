@@ -96,4 +96,10 @@ export class TakePlayer {
     this.t += dtMs;
     return sampleTake(this.take, this.t);
   }
+
+  /** Jumps to `ms` (clamped to the take) and returns the frame there. */
+  seek(ms: number): TakeFrame | undefined {
+    this.t = Math.min(this.take.durationMs, Math.max(0, Number.isFinite(ms) ? ms : 0));
+    return sampleTake(this.take, this.t);
+  }
 }
